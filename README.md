@@ -18,17 +18,17 @@ U can change language whether u want. (SimpCHN or enUS)
 
 Main features: automatic switching between dark and light modes, and an interface and interactions almost identical to Windows 10 Task Manager.
 
-<img src="/Users/linqin/Desktop/MacOS-TSKMGR/Assets/截屏2026-06-25 01.43.40.png" alt="截屏2026-06-25 01.43.40" style="zoom: 50%;" />
+<img src="Assets/截屏2026-06-25 01.43.40.png" alt="截屏2026-06-25 01.43.40" style="zoom: 50%;" />
 
-<img src="/Users/linqin/Desktop/MacOS-TSKMGR/Assets/截屏2026-06-25 01.43.55.png" alt="截屏2026-06-25 01.43.55" style="zoom: 50%;" />
+<img src="Assets/截屏2026-06-25 01.43.55.png" alt="截屏2026-06-25 01.43.55" style="zoom: 50%;" />
 
-<img src="/Users/linqin/Desktop/MacOS-TSKMGR/Assets/截屏2026-06-25 01.44.02.png" alt="截屏2026-06-25 01.44.02" style="zoom: 50%;" />
+<img src="Assets/截屏2026-06-25 01.44.02.png" alt="截屏2026-06-25 01.44.02" style="zoom: 50%;" />
 
-<img src="/Users/linqin/Desktop/MacOS-TSKMGR/Assets/截屏2026-06-25 01.44.08.png" alt="截屏2026-06-25 01.44.08" style="zoom:50%;" />
+<img src="Assets/截屏2026-06-25 01.44.08.png" alt="截屏2026-06-25 01.44.08" style="zoom:50%;" />
 
-<img src="/Users/linqin/Desktop/MacOS-TSKMGR/Assets/截屏2026-06-25 01.44.15.png" alt="截屏2026-06-25 01.44.15" style="zoom:50%;" />
+<img src="Assets/截屏2026-06-25 01.44.15.png" alt="截屏2026-06-25 01.44.15" style="zoom:50%;" />
 
-<img src="/Users/linqin/Desktop/MacOS-TSKMGR/Assets/截屏2026-06-25 01.44.21.png" alt="截屏2026-06-25 01.44.21" style="zoom:50%;" />
+<img src="Assets/截屏2026-06-25 01.44.21.png" alt="截屏2026-06-25 01.44.21" style="zoom:50%;" />
 
 说明：NPU 页面的性能曲线 是结合 ANE (Apple Neural Engine) 可读取的 neural footprint 的变化趋势结合CPU、GPU整体利用率加权出来的估算值。(我不知道这样估算是否合理以及有什么依据，但是图一乐嘛)
 
