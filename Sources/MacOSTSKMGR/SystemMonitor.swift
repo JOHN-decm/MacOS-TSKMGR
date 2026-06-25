@@ -53,15 +53,32 @@ final class SystemMonitor: ObservableObject {
     private var lastServicesRefreshDate: Date = .distantPast
     private var disabledLaunchdByGroup: [String: Set<String>] = [:]
     private var aneInfoCache: ANEDeviceInfo?
+    private var hasStarted = false
+    private var processNetworkTotals: [Int32: UInt64] = [:]
+    private var meteredProcessNetworkTotals: [Int32: UInt64] = [:]
+    private var staticProbeTask: Task<Void, Never>?
+    private var processNetworkProbeTask: Task<Void, Never>?
+    private var gpuProbeTask: Task<Void, Never>?
+    private var npuInfoProbeTask: Task<Void, Never>?
+    private var npuUsageProbeTask: Task<Void, Never>?
+    private var startupProbeTask: Task<Void, Never>?
+    private var servicesProbeTask: Task<Void, Never>?
+    private var lastProcessNetworkProbeDate: Date = .distantPast
+    private var lastGPUProbeDate: Date = .distantPast
+    private var lastNPUUsageProbeDate: Date = .distantPast
+    private var lastStartupRefreshDate: Date = .distantPast
 
     init() {
         var pageSizeValue: vm_size_t = 0
         host_page_size(hostPort, &pageSizeValue)
         self.pageSize = UInt64(pageSizeValue)
         bootstrapStaticInfo()
-        rootWholeDiskID = detectRootWholeDiskIdentifier()
-        hardwarePortMap = loadHardwarePortMap()
-        aneInfoCache = cpuArchitecture == .intelLike ? nil : aneDeviceInfo()
+        rootWholeDiskID = MonitorProbe.rootWholeDiskIdentifierFromMountedRoot()
+    }
+
+    func start() {
+        guard !hasStarted else { return }
+        hasStarted = true
         refresh()
         configureTimer()
     }
@@ -188,22 +205,26 @@ final class SystemMonitor: ObservableObject {
         refreshStartupItems()
         refreshCurrentUserApps()
         refreshDetailProcessRows()
-        refreshServices(ifNeededAt: now)
 
         cpu.processCount = processSections.reduce(0) { $0 + $1.rows.count }
         cpu.threadCount = processSections.flatMap(\.rows).reduce(0) { $0 + $1.threadCount }
         cpu.openFilesCount = processSections.flatMap(\.rows).reduce(0) { $0 + $1.openFiles }
         cpu.uptimeText = DisplayFormat.uptime(ProcessInfo.processInfo.systemUptime)
+        requestSupplementalRefreshes(ifNeededAt: now)
     }
 
     func refreshNow() {
         lastServicesRefreshDate = .distantPast
+        lastStartupRefreshDate = .distantPast
+        lastProcessNetworkProbeDate = .distantPast
+        lastGPUProbeDate = .distantPast
+        lastNPUUsageProbeDate = .distantPast
         refresh()
     }
 
     func refreshServicesNow() {
         lastServicesRefreshDate = .distantPast
-        refresh()
+        scheduleServicesRefresh(ifNeededAt: Date(), force: true)
     }
 
     func setRefreshSpeed(_ speed: RefreshSpeedOption) {
@@ -232,6 +253,163 @@ final class SystemMonitor: ObservableObject {
         timer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { [weak self] _ in
             Task { @MainActor in
                 self?.refresh()
+            }
+        }
+    }
+
+    private func requestSupplementalRefreshes(ifNeededAt now: Date) {
+        scheduleStaticProbeIfNeeded()
+        scheduleProcessNetworkProbe(ifNeededAt: now)
+        scheduleGPURefresh(ifNeededAt: now)
+        scheduleNPURefresh(ifNeededAt: now)
+        scheduleStartupRefresh(ifNeededAt: now)
+        scheduleServicesRefresh(ifNeededAt: now)
+    }
+
+    private func scheduleStaticProbeIfNeeded() {
+        guard staticProbeTask == nil else { return }
+        guard hardwarePortMap.isEmpty || rootWholeDiskID == nil else { return }
+
+        staticProbeTask = Task.detached(priority: .utility) {
+            let snapshot = MonitorProbe.collectStaticProbeSnapshot()
+            await MainActor.run {
+                if let rootWholeDiskID = snapshot.rootWholeDiskID {
+                    self.rootWholeDiskID = rootWholeDiskID
+                }
+                if !snapshot.hardwarePortMap.isEmpty {
+                    self.hardwarePortMap = snapshot.hardwarePortMap
+                }
+                self.staticProbeTask = nil
+            }
+        }
+    }
+
+    private func scheduleProcessNetworkProbe(ifNeededAt now: Date, force: Bool = false) {
+        guard processNetworkProbeTask == nil else { return }
+        let minimumInterval = max(refreshSpeed.interval ?? 1.0, 0.5)
+        guard force || processNetworkTotals.isEmpty || now.timeIntervalSince(lastProcessNetworkProbeDate) >= minimumInterval else { return }
+
+        lastProcessNetworkProbeDate = now
+        processNetworkProbeTask = Task.detached(priority: .utility) {
+            let totals = MonitorProbe.collectProcessNetworkSnapshot(interfaceFilter: nil)
+            let meteredTotals = MonitorProbe.collectProcessNetworkSnapshot(interfaceFilter: "expensive")
+            await MainActor.run {
+                self.processNetworkTotals = totals
+                self.meteredProcessNetworkTotals = meteredTotals
+                self.processNetworkProbeTask = nil
+            }
+        }
+    }
+
+    private func scheduleGPURefresh(ifNeededAt now: Date, force: Bool = false) {
+        guard gpuProbeTask == nil else { return }
+        guard force || gpus.isEmpty || now.timeIntervalSince(lastGPUProbeDate) >= 2 else { return }
+
+        let previousGPUs = gpus
+        let language = language
+        lastGPUProbeDate = now
+        gpuProbeTask = Task.detached(priority: .utility) {
+            let nextGPUs = MonitorProbe.collectGPUStates(previous: previousGPUs, language: language)
+            await MainActor.run {
+                self.gpus = nextGPUs
+                self.gpuProbeTask = nil
+            }
+        }
+    }
+
+    private func scheduleNPURefresh(ifNeededAt now: Date, force: Bool = false) {
+        guard cpuArchitecture != .intelLike else {
+            npus = []
+            return
+        }
+
+        if aneInfoCache == nil {
+            guard npuInfoProbeTask == nil else { return }
+            let architecture = cpuArchitecture
+            npuInfoProbeTask = Task.detached(priority: .utility) {
+                let info = MonitorProbe.collectANEDeviceInfo(cpuArchitecture: architecture)
+                await MainActor.run {
+                    self.aneInfoCache = info
+                    self.npuInfoProbeTask = nil
+                }
+            }
+            return
+        }
+
+        guard npuUsageProbeTask == nil else { return }
+        let minimumInterval = max(refreshSpeed.interval ?? 1.0, 0.5)
+        guard force || npus.isEmpty || now.timeIntervalSince(lastNPUUsageProbeDate) >= minimumInterval else { return }
+
+        let aneInfo = aneInfoCache
+        let previousNPU = npus.first
+        let cpuUtilization = cpu.utilizationPercent
+        let gpuUtilization = gpus.first?.utilizationPercent ?? 0
+        let totalMemory = memory.totalBytes
+        lastNPUUsageProbeDate = now
+        npuUsageProbeTask = Task.detached(priority: .utility) {
+            let nextNPU = MonitorProbe.collectNPUState(
+                previous: previousNPU,
+                aneInfo: aneInfo,
+                cpuUtilization: cpuUtilization,
+                gpuUtilization: gpuUtilization,
+                totalMemory: totalMemory
+            )
+            await MainActor.run {
+                self.npus = nextNPU.map { [$0] } ?? []
+                self.npuUsageProbeTask = nil
+            }
+        }
+    }
+
+    private func scheduleStartupRefresh(ifNeededAt now: Date, force: Bool = false) {
+        guard startupProbeTask == nil else { return }
+        guard force || startupRows.isEmpty || now.timeIntervalSince(lastStartupRefreshDate) >= 30 else { return }
+
+        lastStartupRefreshDate = now
+        let language = language
+        startupProbeTask = Task.detached(priority: .utility) {
+            let snapshot = MonitorProbe.collectStartupRows()
+            await MainActor.run {
+                self.disabledLaunchdByGroup = snapshot.disabledLaunchdByGroup
+                self.startupRows = snapshot.rows.map { row in
+                    StartupItemRowData(
+                        id: row.id,
+                        name: row.name,
+                        icon: row.iconProgramPath.flatMap { self.startupItemIcon(fromProgramPath: $0) },
+                        publisher: row.publisher,
+                        status: row.status,
+                        startupImpact: row.startupImpact
+                    )
+                }
+                self.startupProbeTask = nil
+                if self.language != language {
+                    self.startupRows = self.startupRows.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+                }
+            }
+        }
+    }
+
+    private func scheduleServicesRefresh(ifNeededAt now: Date, force: Bool = false) {
+        guard servicesProbeTask == nil else { return }
+        guard force || serviceRows.isEmpty || now.timeIntervalSince(lastServicesRefreshDate) >= 5 else { return }
+
+        lastServicesRefreshDate = now
+        servicesProbeTask = Task.detached(priority: .utility) {
+            let snapshot = MonitorProbe.collectServiceRows(uid: getuid())
+            await MainActor.run {
+                self.serviceRows = snapshot.map { row in
+                    ServiceRowData(
+                        id: row.id,
+                        name: row.name,
+                        icon: row.iconProgramPath.flatMap { self.startupItemIcon(fromProgramPath: $0) },
+                        pid: row.pid,
+                        serviceDescription: row.serviceDescription,
+                        status: row.status,
+                        group: row.group,
+                        label: row.label
+                    )
+                }
+                self.servicesProbeTask = nil
             }
         }
     }
@@ -313,21 +491,27 @@ final class SystemMonitor: ObservableObject {
         let total = ProcessInfo.processInfo.physicalMemory
         let free = UInt64(stats.free_count) * pageSize
         let speculative = UInt64(stats.speculative_count) * pageSize
-        let inactive = UInt64(stats.inactive_count) * pageSize
-        let active = UInt64(stats.active_count) * pageSize
         let wired = UInt64(stats.wire_count) * pageSize
         let compressed = UInt64(stats.compressor_page_count) * pageSize
         let purgeable = UInt64(stats.purgeable_count) * pageSize
-        let available = free + speculative + inactive
-        let used = min(total, active + wired + compressed)
+        let fileBacked = UInt64(stats.external_page_count) * pageSize
+        let anonymous = UInt64(stats.internal_page_count) * pageSize
+
+        // Activity Monitor's memory categories track anonymous and file-backed
+        // pages more closely than active/inactive lists. Using active/inactive
+        // overstates cache and understates app memory on modern macOS.
+        let appMemory = anonymous > purgeable ? anonymous - purgeable : anonymous
+        let cached = fileBacked + purgeable
+        let available = free + speculative + cached
+        let used = min(total, appMemory + wired + compressed)
 
         memory.totalBytes = total
         memory.usedBytes = used
         memory.availableBytes = available
         memory.compressedBytes = compressed
-        memory.cachedBytes = inactive + purgeable
+        memory.cachedBytes = cached
         memory.wiredBytes = wired
-        memory.appMemoryBytes = active
+        memory.appMemoryBytes = appMemory
         memory.swapUsedBytes = swapUsageBytes()
         memory.historyPercent = shifted(memory.historyPercent, adding: percent(used, total))
         memory.historyUsedBytes = shifted(memory.historyUsedBytes, adding: Double(used))
@@ -346,7 +530,7 @@ final class SystemMonitor: ObservableObject {
 
         var newCPUCache: [Int32: UInt64] = [:]
         var newRUsageCache: [Int32: (UInt64, UInt64)] = [:]
-        let processNetworkTotals = processNetworkSnapshot(interfaceFilter: nil)
+        let processNetworkTotals = self.processNetworkTotals
         var newNetworkCache: [Int32: UInt64] = [:]
 
         for pid in pids where pid > 0 {
@@ -472,7 +656,7 @@ final class SystemMonitor: ObservableObject {
         let diskDelta = (currentDisk.read >= previousDisk.read ? currentDisk.read - previousDisk.read : 0) + (currentDisk.write >= previousDisk.write ? currentDisk.write - previousDisk.write : 0)
         let diskPerSecond = UInt64(Double(diskDelta) / max(refreshSpeed.interval ?? 1.0, 0.5))
 
-        let networkTotals = processNetworkSnapshot(interfaceFilter: nil)
+        let networkTotals = processNetworkTotals
         let totalNetworkBytes = networkTotals[pid] ?? 0
         let previousNetworkBytes = previousProcessNetworkTotals[pid] ?? totalNetworkBytes
         let networkDelta = totalNetworkBytes >= previousNetworkBytes ? (totalNetworkBytes - previousNetworkBytes) : UInt64(0)
@@ -501,8 +685,8 @@ final class SystemMonitor: ObservableObject {
 
     private func refreshAppHistory() {
         let apps = frontWindowApplications()
-        let networkTotals = processNetworkSnapshot(interfaceFilter: nil)
-        let meteredNetworkTotals = processNetworkSnapshot(interfaceFilter: "expensive")
+        let networkTotals = processNetworkTotals
+        let meteredNetworkTotals = meteredProcessNetworkTotals
         let historyRows: [AppHistoryRowData] = apps.map { app in
             let pid = app.processIdentifier
             let name = app.localizedName ?? app.bundleIdentifier ?? language.text("未知应用", "Unknown app")
@@ -590,38 +774,23 @@ final class SystemMonitor: ObservableObject {
     }
 
     private func refreshStartupItems() {
-        refreshDisabledLaunchdState()
-        startupRows = startupItems()
+        if startupRows.isEmpty {
+            scheduleStartupRefresh(ifNeededAt: Date(), force: true)
+        }
     }
 
     func refreshDisabledLaunchdState() {
-        let uid = getuid()
-        disabledLaunchdByGroup["system"] = disabledLaunchdLabels(domain: "system")
-        disabledLaunchdByGroup["gui/\(uid)"] = disabledLaunchdLabels(domain: "gui/\(uid)")
+        scheduleStartupRefresh(ifNeededAt: Date(), force: true)
     }
 
     func disabledLaunchdLabels(domain: String) -> Set<String> {
-        guard let data = try? Process.runAndCapture("/bin/launchctl", ["print-disabled", domain]),
-              let text = String(data: data, encoding: .utf8)
-        else {
-            return []
-        }
-
-        var labels: Set<String> = []
-        for line in text.components(separatedBy: .newlines) {
-            let trimmed = line.trimmingCharacters(in: .whitespaces)
-            guard trimmed.hasPrefix("\""), trimmed.contains("=> disabled") else { continue }
-            if let end = trimmed.dropFirst().firstIndex(of: "\"") {
-                labels.insert(String(trimmed.dropFirst()[..<end]))
-            }
-        }
-        return labels
+        disabledLaunchdByGroup[domain] ?? []
     }
 
     func clearAppHistory() {
         let apps = frontWindowApplications()
-        let networkTotals = processNetworkSnapshot(interfaceFilter: nil)
-        let meteredNetworkTotals = processNetworkSnapshot(interfaceFilter: "expensive")
+        let networkTotals = processNetworkTotals
+        let meteredNetworkTotals = meteredProcessNetworkTotals
 
         var cpuBaseline: [Int32: Double] = [:]
         var networkBaseline: [Int32: UInt64] = [:]
@@ -1006,64 +1175,7 @@ final class SystemMonitor: ObservableObject {
     }
 
     private func refreshNPUs() {
-        guard cpuArchitecture != .intelLike else {
-            npus = []
-            return
-        }
-        guard let aneInfo = aneInfoCache ?? aneDeviceInfo() else {
-            npus = []
-            return
-        }
-
-        let usage = currentNeuralUsageTotals()
-        let previous = npus.first
-        let peakFootprint = max(previous?.peakNeuralFootprintBytes ?? 0, usage.intervalPeakBytes, usage.currentBytes, 1)
-        let previousFootprint = previous?.neuralFootprintBytes ?? usage.currentBytes
-        let deltaFootprint = usage.currentBytes >= previousFootprint ? usage.currentBytes - previousFootprint : previousFootprint - usage.currentBytes
-        let gpuUtil = gpus.first?.utilizationPercent ?? 0
-        let footprintDeltaPercent = min(Double(deltaFootprint) / Double(max(peakFootprint, 1)) * 100, 100)
-        let activity = min(
-            max(
-                3.0
-                + cpu.utilizationPercent * 0.04
-                + gpuUtil * 0.05
-                + footprintDeltaPercent * 0.08,
-                0
-            ),
-            18
-        )
-        let utilization = activity
-        let historyCompute = shifted(previous?.historyCompute ?? Array(repeating: 0, count: 60), adding: activity)
-        let historyFootprint = shifted(
-            previous?.historyFootprint ?? Array(repeating: 0, count: 60),
-            adding: min(Double(usage.currentBytes) / Double(max(peakFootprint, 1)) * 100, 100)
-        )
-        let historyMemoryPressure = shifted(
-            previous?.historyMemoryPressure ?? Array(repeating: 0, count: 60),
-            adding: min(Double(usage.currentBytes) / Double(max(memory.totalBytes, 1)) * 100, 100)
-        )
-
-        npus = [
-            NPUState(
-                id: "npu0",
-                title: "NPU 0",
-                subtitle: aneInfo.modelName,
-                modelName: aneInfo.modelName,
-                npuCount: aneInfo.npuCount,
-                coreCount: aneInfo.coreCount,
-                architecture: aneInfo.architecture,
-                firmwareLoaded: aneInfo.firmwareLoaded,
-                currentPowerState: aneInfo.currentPowerState,
-                maxPowerState: aneInfo.maxPowerState,
-                activeClientCount: aneInfo.activeClientCount,
-                utilizationPercent: utilization,
-                neuralFootprintBytes: usage.currentBytes,
-                peakNeuralFootprintBytes: peakFootprint,
-                historyCompute: historyCompute,
-                historyFootprint: historyFootprint,
-                historyMemoryPressure: historyMemoryPressure
-            )
-        ]
+        scheduleNPURefresh(ifNeededAt: Date())
     }
 
     private func cpuGridHistories() -> [[Double]] {
@@ -1202,101 +1314,15 @@ extension SystemMonitor {
     }
 
     func widgetExtensionMap() -> [String: Int] {
-        guard let data = try? Process.runAndCapture("/usr/bin/pluginkit", ["-m", "-A", "-D", "-p", "com.apple.widgetkit-extension"]),
-              let text = String(data: data, encoding: .utf8)
-        else {
-            return [:]
-        }
-
-        var map: [String: Int] = [:]
-        for line in text.components(separatedBy: .newlines) {
-            let trimmed = line.trimmingCharacters(in: .whitespaces)
-            guard !trimmed.isEmpty else { continue }
-            if let bundleID = trimmed.split(separator: "(").first?.trimmingCharacters(in: .whitespaces), !bundleID.isEmpty {
-                map[bundleID, default: 0] += 1
-            }
-        }
-        return map
+        [:]
     }
 
     func startupItems() -> [StartupItemRowData] {
-        var rows: [StartupItemRowData] = []
-
-        if let loginItemNames = try? Process.runAndCapture("/usr/bin/osascript", ["-e", "tell application \"System Events\" to get the name of every login item"]),
-           let namesString = String(data: loginItemNames, encoding: .utf8)?
-            .trimmingCharacters(in: .whitespacesAndNewlines),
-           !namesString.isEmpty
-        {
-            let names = namesString.split(separator: ",").map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-                rows.append(contentsOf: names.map {
-                    StartupItemRowData(
-                        id: "login-\($0)",
-                        name: $0,
-                        icon: nil,
-                        publisher: "登录项",
-                        status: "已启用",
-                        startupImpact: "未计算"
-                    )
-                })
-        }
-
-        for item in launchAgentItems() {
-            if rows.contains(where: { $0.id == item.id || $0.name == item.name }) { continue }
-            rows.append(item)
-        }
-
-        return rows.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+        startupRows
     }
 
     func refreshServices(ifNeededAt now: Date) {
-        guard serviceRows.isEmpty || now.timeIntervalSince(lastServicesRefreshDate) >= 5 else { return }
-        lastServicesRefreshDate = now
-
-        let uid = getuid()
-        let runtimeEntries = launchdRuntimeEntries(uid: uid)
-        let metadataByKey = launchdPlistMetadata(uid: uid)
-        var merged: [String: ServiceRowData] = [:]
-
-        for entry in runtimeEntries {
-            let key = serviceCompositeKey(label: entry.label, group: entry.group)
-            let metadata = metadataByKey[key]
-            let status = serviceStatusText(pid: entry.pid, stateToken: entry.stateToken, disabled: metadata?.disabled ?? false)
-            merged[key] = ServiceRowData(
-                id: key,
-                name: metadata?.name ?? serviceNameFallback(label: entry.label),
-                icon: metadata?.icon,
-                pid: entry.pid,
-                serviceDescription: metadata?.serviceDescription ?? entry.label,
-                status: status,
-                group: entry.group,
-                label: entry.label
-            )
-        }
-
-        for (key, metadata) in metadataByKey where merged[key] == nil {
-            merged[key] = ServiceRowData(
-                id: key,
-                name: metadata.name,
-                icon: metadata.icon,
-                pid: nil,
-                serviceDescription: metadata.serviceDescription,
-                status: metadata.disabled ? "已禁用" : "未加载",
-                group: metadata.group,
-                label: metadata.label
-            )
-        }
-
-        serviceRows = merged.values.sorted { lhs, rhs in
-            let nameCompare = lhs.name.localizedStandardCompare(rhs.name)
-            if nameCompare != .orderedSame {
-                return nameCompare == .orderedAscending
-            }
-            let labelCompare = lhs.label.localizedStandardCompare(rhs.label)
-            if labelCompare != .orderedSame {
-                return labelCompare == .orderedAscending
-            }
-            return lhs.group.localizedStandardCompare(rhs.group) == .orderedAscending
-        }
+        scheduleServicesRefresh(ifNeededAt: now)
     }
 
     func launchAgentItems() -> [StartupItemRowData] {
@@ -1699,38 +1725,7 @@ extension SystemMonitor {
     }
 
     func processNetworkSnapshot(interfaceFilter: String?) -> [Int32: UInt64] {
-        var arguments = ["-x", "-P", "-L", "1"]
-        if let interfaceFilter {
-            arguments.append(contentsOf: ["-t", interfaceFilter])
-        }
-        guard let data = try? Process.runAndCapture("/usr/sbin/nettop", arguments) else {
-            return [:]
-        }
-        guard let text = String(data: data, encoding: .utf8) else { return [:] }
-
-        var result: [Int32: UInt64] = [:]
-        let apps = NSWorkspace.shared.runningApplications
-        let pidByName = Dictionary(uniqueKeysWithValues: apps.compactMap { app -> (String, Int32)? in
-            guard let name = app.localizedName else { return nil }
-            return (name, app.processIdentifier)
-        })
-
-        for line in text.components(separatedBy: .newlines).dropFirst() {
-            let parts = line.split(whereSeparator: \.isWhitespace)
-            guard parts.count >= 6 else { continue }
-            let processToken = String(parts[1])
-            let bytesIn = UInt64(parts[4]) ?? 0
-            let bytesOut = UInt64(parts[5]) ?? 0
-            let total = bytesIn + bytesOut
-
-            if let dotIndex = processToken.lastIndex(of: "."),
-               let pid = Int32(processToken[processToken.index(after: dotIndex)...]) {
-                result[pid] = total
-            } else if let pid = pidByName[processToken] {
-                result[pid] = total
-            }
-        }
-        return result
+        interfaceFilter == "expensive" ? meteredProcessNetworkTotals : processNetworkTotals
     }
 
     func listPIDs() -> [Int32] {
@@ -2057,67 +2052,7 @@ extension SystemMonitor {
     }
 
     func refreshGPUs() {
-        guard
-            let profilerData = try? Process.runAndCapture("/usr/sbin/system_profiler", ["SPDisplaysDataType", "-json"]),
-            let profilerJSON = try? JSONSerialization.jsonObject(with: profilerData) as? [String: Any],
-            let profilerItems = profilerJSON["SPDisplaysDataType"] as? [[String: Any]],
-            let acceleratorData = try? Process.runAndCapture("/usr/sbin/ioreg", ["-r", "-d", "1", "-c", "IOAccelerator", "-a", "-l"]),
-            let acceleratorArray = try? PropertyListSerialization.propertyList(from: acceleratorData, options: [], format: nil) as? [[String: Any]]
-        else {
-            return
-        }
-
-        var next: [GPUState] = []
-        let gpuCount = profilerItems.count
-        for (index, item) in profilerItems.enumerated() {
-            guard let model = item["sppci_model"] as? String ?? item["_name"] as? String else { continue }
-            let metalRaw = item["spdisplays_mtlgpufamilysupport"] as? String ?? ""
-            let metalVersion = metalLabel(from: metalRaw)
-            let coreCount = Int(item["sppci_cores"] as? String ?? "") ?? 0
-            let gpuType = ((item["sppci_bus"] as? String) == "spdisplays_builtin")
-                ? language.text("内建", "Internal")
-                : language.text("外建", "External")
-
-            let ioEntry = acceleratorArray[safe: min(index, acceleratorArray.count - 1)]
-            let performance = ioEntry?["PerformanceStatistics"] as? [String: Any]
-            let deviceUtil = (performance?["Device Utilization %"] as? NSNumber)?.doubleValue ?? 0
-            let rendererUtil = (performance?["Renderer Utilization %"] as? NSNumber)?.doubleValue ?? 0
-            let tilerUtil = (performance?["Tiler Utilization %"] as? NSNumber)?.doubleValue ?? 0
-            let inUseMemory = (performance?["In use system memory"] as? NSNumber)?.uint64Value ?? 0
-            let allocatedMemory = (performance?["Alloc system memory"] as? NSNumber)?.uint64Value ?? 0
-            let openGLVersion: String? = nil
-
-            let id = "gpu\(index)"
-            let previous = gpus.first(where: { $0.id == id })
-            let historyOverall = shifted(previous?.historyOverall ?? Array(repeating: 0, count: 60), adding: deviceUtil)
-            let history3D = shifted(previous?.history3D ?? Array(repeating: 0, count: 60), adding: rendererUtil)
-            let historyTiler = shifted(previous?.historyTiler ?? Array(repeating: 0, count: 60), adding: tilerUtil)
-            let memoryPercent = allocatedMemory > 0 ? min(Double(inUseMemory) / Double(allocatedMemory) * 100, 100) : 0
-            let memoryHistory = shifted(previous?.memoryHistory ?? Array(repeating: 0, count: 60), adding: memoryPercent)
-
-            next.append(GPUState(
-                id: id,
-                title: "GPU \(index)",
-                subtitle: model,
-                modelName: model,
-                gpuCount: gpuCount,
-                gpuType: gpuType,
-                coreCount: coreCount,
-                utilizationPercent: deviceUtil,
-                rendererUtilizationPercent: rendererUtil,
-                tilerUtilizationPercent: tilerUtil,
-                sharedMemoryUsedBytes: inUseMemory,
-                sharedMemoryAllocatedBytes: allocatedMemory,
-                metalVersion: metalVersion,
-                openGLVersion: openGLVersion,
-                historyOverall: historyOverall,
-                history3D: history3D,
-                historyTiler: historyTiler,
-                memoryHistory: memoryHistory
-            ))
-        }
-
-        gpus = next
+        scheduleGPURefresh(ifNeededAt: Date())
     }
 
     func metalLabel(from raw: String) -> String {
@@ -2520,5 +2455,729 @@ extension Process {
         let data = pipe.fileHandleForReading.readDataToEndOfFile()
         process.waitUntilExit()
         return data
+    }
+}
+
+private enum MonitorProbe {
+    struct StaticProbeSnapshot {
+        let rootWholeDiskID: String?
+        let hardwarePortMap: [String: String]
+    }
+
+    struct StartupRowSnapshot {
+        let id: String
+        let name: String
+        let iconProgramPath: String?
+        let publisher: String
+        let status: String
+        let startupImpact: String
+    }
+
+    struct StartupSnapshot {
+        let disabledLaunchdByGroup: [String: Set<String>]
+        let rows: [StartupRowSnapshot]
+    }
+
+    struct ServiceRowSnapshot {
+        let id: String
+        let name: String
+        let iconProgramPath: String?
+        let pid: Int32?
+        let serviceDescription: String
+        let status: String
+        let group: String
+        let label: String
+    }
+
+    static func collectStaticProbeSnapshot() -> StaticProbeSnapshot {
+        StaticProbeSnapshot(
+            rootWholeDiskID: detectRootWholeDiskIdentifier(),
+            hardwarePortMap: loadHardwarePortMap()
+        )
+    }
+
+    static func collectProcessNetworkSnapshot(interfaceFilter: String?) -> [Int32: UInt64] {
+        var arguments = ["-x", "-P", "-L", "1"]
+        if let interfaceFilter {
+            arguments.append(contentsOf: ["-t", interfaceFilter])
+        }
+        guard let data = try? Process.runAndCapture("/usr/sbin/nettop", arguments),
+              let text = String(data: data, encoding: .utf8)
+        else {
+            return [:]
+        }
+
+        var result: [Int32: UInt64] = [:]
+        let apps = NSWorkspace.shared.runningApplications
+        let pidByName = Dictionary(uniqueKeysWithValues: apps.compactMap { app -> (String, Int32)? in
+            guard let name = app.localizedName else { return nil }
+            return (name, app.processIdentifier)
+        })
+
+        for line in text.components(separatedBy: .newlines).dropFirst() {
+            let parts = line.split(whereSeparator: \.isWhitespace)
+            guard parts.count >= 6 else { continue }
+            let processToken = String(parts[1])
+            let bytesIn = UInt64(parts[4]) ?? 0
+            let bytesOut = UInt64(parts[5]) ?? 0
+            let total = bytesIn + bytesOut
+
+            if let dotIndex = processToken.lastIndex(of: "."),
+               let pid = Int32(processToken[processToken.index(after: dotIndex)...]) {
+                result[pid] = total
+            } else if let pid = pidByName[processToken] {
+                result[pid] = total
+            }
+        }
+        return result
+    }
+
+    static func collectANEDeviceInfo(cpuArchitecture: CPUArchitecture) -> SystemMonitor.ANEDeviceInfo? {
+        guard cpuArchitecture != .intelLike else {
+            return nil
+        }
+        guard let data = try? Process.runAndCapture("/usr/sbin/ioreg", ["-l", "-w0"]),
+              let text = String(data: data, encoding: .utf8),
+              text.localizedCaseInsensitiveContains("ANE")
+        else {
+            return nil
+        }
+
+        let npuCount = text.localizedCaseInsensitiveContains("ANEDevicePropertyNumANEs") ? 1 : 1
+        let coreCount = 16
+        let modelName = "Apple Neural Engine"
+        let architecture = extractFirstMatch(in: text, pattern: #"ANEDevicePropertyTypeANEArchitectureTypeStr"="([^"]+)""#) ?? "h16g"
+        let firmwareLoaded = text.localizedCaseInsensitiveContains(#""FirmwareLoaded" = Yes"#) || text.localizedCaseInsensitiveContains(#""FirmwareLoaded" = true"#)
+        let aneBlock = extractFirstMatch(in: text, pattern: #"(?s)\+\-o H11ANE .*?\{(.*?)\n\s*\}"#) ?? text
+        let currentPowerState = Int(extractFirstMatch(in: aneBlock, pattern: #""CurrentPowerState"=([0-9]+)"#) ?? "0") ?? 0
+        let maxPowerState = Int(extractFirstMatch(in: aneBlock, pattern: #""MaxPowerState"=([0-9]+)"#) ?? "1") ?? 1
+        let activeClientCount = max(text.components(separatedBy: "IOUserClientCreator").count - 1, 0)
+        let capacityBytes = sysctlInt("hw.memsize").map { max($0, 1_073_741_824) } ?? 1_073_741_824
+        return SystemMonitor.ANEDeviceInfo(
+            modelName: modelName,
+            npuCount: npuCount,
+            coreCount: coreCount,
+            capacityBytes: capacityBytes,
+            architecture: architecture,
+            firmwareLoaded: firmwareLoaded,
+            currentPowerState: currentPowerState,
+            maxPowerState: maxPowerState,
+            activeClientCount: activeClientCount
+        )
+    }
+
+    static func collectNPUState(
+        previous: NPUState?,
+        aneInfo: SystemMonitor.ANEDeviceInfo?,
+        cpuUtilization: Double,
+        gpuUtilization: Double,
+        totalMemory: UInt64
+    ) -> NPUState? {
+        guard let aneInfo else { return nil }
+
+        let usage = currentNeuralUsageTotals()
+        let peakFootprint = max(previous?.peakNeuralFootprintBytes ?? 0, usage.intervalPeakBytes, usage.currentBytes, 1)
+        let previousFootprint = previous?.neuralFootprintBytes ?? usage.currentBytes
+        let deltaFootprint = usage.currentBytes >= previousFootprint ? usage.currentBytes - previousFootprint : previousFootprint - usage.currentBytes
+        let footprintDeltaPercent = min(Double(deltaFootprint) / Double(max(peakFootprint, 1)) * 100, 100)
+        let activity = min(
+            max(
+                3.0
+                + cpuUtilization * 0.04
+                + gpuUtilization * 0.05
+                + footprintDeltaPercent * 0.08,
+                0
+            ),
+            18
+        )
+        let historyCompute = shifted(previous?.historyCompute ?? Array(repeating: 0, count: 60), adding: activity)
+        let historyFootprint = shifted(
+            previous?.historyFootprint ?? Array(repeating: 0, count: 60),
+            adding: min(Double(usage.currentBytes) / Double(max(peakFootprint, 1)) * 100, 100)
+        )
+        let historyMemoryPressure = shifted(
+            previous?.historyMemoryPressure ?? Array(repeating: 0, count: 60),
+            adding: min(Double(usage.currentBytes) / Double(max(totalMemory, 1)) * 100, 100)
+        )
+
+        return NPUState(
+            id: "npu0",
+            title: "NPU 0",
+            subtitle: aneInfo.modelName,
+            modelName: aneInfo.modelName,
+            npuCount: aneInfo.npuCount,
+            coreCount: aneInfo.coreCount,
+            architecture: aneInfo.architecture,
+            firmwareLoaded: aneInfo.firmwareLoaded,
+            currentPowerState: aneInfo.currentPowerState,
+            maxPowerState: aneInfo.maxPowerState,
+            activeClientCount: aneInfo.activeClientCount,
+            utilizationPercent: activity,
+            neuralFootprintBytes: usage.currentBytes,
+            peakNeuralFootprintBytes: peakFootprint,
+            historyCompute: historyCompute,
+            historyFootprint: historyFootprint,
+            historyMemoryPressure: historyMemoryPressure
+        )
+    }
+
+    static func collectGPUStates(previous: [GPUState], language: AppLanguage) -> [GPUState] {
+        guard
+            let profilerData = try? Process.runAndCapture("/usr/sbin/system_profiler", ["SPDisplaysDataType", "-json"]),
+            let profilerJSON = try? JSONSerialization.jsonObject(with: profilerData) as? [String: Any],
+            let profilerItems = profilerJSON["SPDisplaysDataType"] as? [[String: Any]],
+            let acceleratorData = try? Process.runAndCapture("/usr/sbin/ioreg", ["-r", "-d", "1", "-c", "IOAccelerator", "-a", "-l"]),
+            let acceleratorArray = try? PropertyListSerialization.propertyList(from: acceleratorData, options: [], format: nil) as? [[String: Any]]
+        else {
+            return previous
+        }
+
+        var next: [GPUState] = []
+        let gpuCount = profilerItems.count
+        for (index, item) in profilerItems.enumerated() {
+            guard let model = item["sppci_model"] as? String ?? item["_name"] as? String else { continue }
+            let metalRaw = item["spdisplays_mtlgpufamilysupport"] as? String ?? ""
+            let metalVersion = metalLabel(from: metalRaw)
+            let coreCount = Int(item["sppci_cores"] as? String ?? "") ?? 0
+            let gpuType = ((item["sppci_bus"] as? String) == "spdisplays_builtin")
+                ? language.text("内建", "Internal")
+                : language.text("外建", "External")
+
+            let ioEntry = acceleratorArray[safe: min(index, acceleratorArray.count - 1)]
+            let performance = ioEntry?["PerformanceStatistics"] as? [String: Any]
+            let deviceUtil = (performance?["Device Utilization %"] as? NSNumber)?.doubleValue ?? 0
+            let rendererUtil = (performance?["Renderer Utilization %"] as? NSNumber)?.doubleValue ?? 0
+            let tilerUtil = (performance?["Tiler Utilization %"] as? NSNumber)?.doubleValue ?? 0
+            let inUseMemory = (performance?["In use system memory"] as? NSNumber)?.uint64Value ?? 0
+            let allocatedMemory = (performance?["Alloc system memory"] as? NSNumber)?.uint64Value ?? 0
+            let openGLVersion: String? = nil
+
+            let id = "gpu\(index)"
+            let previousState = previous.first(where: { $0.id == id })
+            let historyOverall = shifted(previousState?.historyOverall ?? Array(repeating: 0, count: 60), adding: deviceUtil)
+            let history3D = shifted(previousState?.history3D ?? Array(repeating: 0, count: 60), adding: rendererUtil)
+            let historyTiler = shifted(previousState?.historyTiler ?? Array(repeating: 0, count: 60), adding: tilerUtil)
+            let memoryPercent = allocatedMemory > 0 ? min(Double(inUseMemory) / Double(allocatedMemory) * 100, 100) : 0
+            let memoryHistory = shifted(previousState?.memoryHistory ?? Array(repeating: 0, count: 60), adding: memoryPercent)
+
+            next.append(GPUState(
+                id: id,
+                title: "GPU \(index)",
+                subtitle: model,
+                modelName: model,
+                gpuCount: gpuCount,
+                gpuType: gpuType,
+                coreCount: coreCount,
+                utilizationPercent: deviceUtil,
+                rendererUtilizationPercent: rendererUtil,
+                tilerUtilizationPercent: tilerUtil,
+                sharedMemoryUsedBytes: inUseMemory,
+                sharedMemoryAllocatedBytes: allocatedMemory,
+                metalVersion: metalVersion,
+                openGLVersion: openGLVersion,
+                historyOverall: historyOverall,
+                history3D: history3D,
+                historyTiler: historyTiler,
+                memoryHistory: memoryHistory
+            ))
+        }
+
+        return next
+    }
+
+    static func collectStartupRows() -> StartupSnapshot {
+        let uid = getuid()
+        var disabledLaunchdByGroup: [String: Set<String>] = [:]
+        disabledLaunchdByGroup["system"] = disabledLaunchdLabels(domain: "system")
+        disabledLaunchdByGroup["gui/\(uid)"] = disabledLaunchdLabels(domain: "gui/\(uid)")
+
+        let directories = [
+            "/Library/LaunchAgents",
+            "/Library/LaunchDaemons",
+            ("~/Library/LaunchAgents" as NSString).expandingTildeInPath
+        ]
+
+        var rows: [StartupRowSnapshot] = []
+        if let loginItemNames = try? Process.runAndCapture("/usr/bin/osascript", ["-e", "tell application \"System Events\" to get the name of every login item"]),
+           let namesString = String(data: loginItemNames, encoding: .utf8)?
+            .trimmingCharacters(in: .whitespacesAndNewlines),
+           !namesString.isEmpty
+        {
+            let names = namesString.split(separator: ",").map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            rows.append(contentsOf: names.map {
+                StartupRowSnapshot(
+                    id: "login-\($0)",
+                    name: $0,
+                    iconProgramPath: nil,
+                    publisher: "登录项",
+                    status: "已启用",
+                    startupImpact: "未计算"
+                )
+            })
+        }
+
+        let fileManager = FileManager.default
+        for directory in directories {
+            guard let entries = try? fileManager.contentsOfDirectory(atPath: directory) else { continue }
+            for entry in entries where entry.hasSuffix(".plist") {
+                let path = (directory as NSString).appendingPathComponent(entry)
+                guard let data = fileManager.contents(atPath: path),
+                      let plist = try? PropertyListSerialization.propertyList(from: data, options: [], format: nil) as? [String: Any]
+                else { continue }
+
+                let label = plist["Label"] as? String ?? entry.replacingOccurrences(of: ".plist", with: "")
+                let program = (plist["Program"] as? String)
+                    ?? (plist["ProgramArguments"] as? [String])?.first
+                    ?? ""
+                let name = URL(fileURLWithPath: program).deletingPathExtension().lastPathComponent.isEmpty
+                    ? label
+                    : URL(fileURLWithPath: program).deletingPathExtension().lastPathComponent
+                let publisher = program.isEmpty ? directoryLabel(directory) : URL(fileURLWithPath: program).deletingLastPathComponent().lastPathComponent
+                let group = launchdGroupForStartupDirectory(directory)
+                let labelDisabled = disabledLaunchdByGroup[group]?.contains(label) ?? false
+                let plistDisabled = (plist["Disabled"] as? Bool) ?? false
+                let enabled = !(plistDisabled || labelDisabled)
+                let impact = directory.contains("Daemons") ? "高" : "未计算"
+
+                let row = StartupRowSnapshot(
+                    id: path,
+                    name: name,
+                    iconProgramPath: program.isEmpty ? nil : program,
+                    publisher: publisher,
+                    status: enabled ? "已启用" : "已禁用",
+                    startupImpact: impact
+                )
+                if rows.contains(where: { $0.id == row.id || $0.name == row.name }) { continue }
+                rows.append(row)
+            }
+        }
+
+        return StartupSnapshot(
+            disabledLaunchdByGroup: disabledLaunchdByGroup,
+            rows: rows.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+        )
+    }
+
+    static func collectServiceRows(uid: uid_t) -> [ServiceRowSnapshot] {
+        let runtimeEntries = launchdRuntimeEntries(uid: uid)
+        let metadataByKey = launchdPlistMetadata(uid: uid)
+        var merged: [String: ServiceRowSnapshot] = [:]
+
+        for entry in runtimeEntries {
+            let key = serviceCompositeKey(label: entry.label, group: entry.group)
+            let metadata = metadataByKey[key]
+            let status = serviceStatusText(pid: entry.pid, stateToken: entry.stateToken, disabled: metadata?.disabled ?? false)
+            merged[key] = ServiceRowSnapshot(
+                id: key,
+                name: metadata?.name ?? serviceNameFallback(label: entry.label),
+                iconProgramPath: metadata?.program,
+                pid: entry.pid,
+                serviceDescription: metadata?.serviceDescription ?? entry.label,
+                status: status,
+                group: entry.group,
+                label: entry.label
+            )
+        }
+
+        for (key, metadata) in metadataByKey where merged[key] == nil {
+            merged[key] = ServiceRowSnapshot(
+                id: key,
+                name: metadata.name,
+                iconProgramPath: metadata.program,
+                pid: nil,
+                serviceDescription: metadata.serviceDescription,
+                status: metadata.disabled ? "已禁用" : "未加载",
+                group: metadata.group,
+                label: metadata.label
+            )
+        }
+
+        return merged.values.sorted { lhs, rhs in
+            let nameCompare = lhs.name.localizedStandardCompare(rhs.name)
+            if nameCompare != .orderedSame {
+                return nameCompare == .orderedAscending
+            }
+            let labelCompare = lhs.label.localizedStandardCompare(rhs.label)
+            if labelCompare != .orderedSame {
+                return labelCompare == .orderedAscending
+            }
+            return lhs.group.localizedStandardCompare(rhs.group) == .orderedAscending
+        }
+    }
+
+    static func rootWholeDiskIdentifierFromMountedRoot() -> String? {
+        var stats = statfs()
+        guard statfs("/", &stats) == 0 else { return nil }
+        let source = withUnsafePointer(to: &stats.f_mntfromname) {
+            $0.withMemoryRebound(to: CChar.self, capacity: Int(MNAMELEN)) { pointer in
+                String(cString: pointer)
+            }
+        }
+        return wholeDiskIdentifier(fromDevicePath: source)
+    }
+
+    static func detectRootWholeDiskIdentifier() -> String? {
+        if let data = try? Process.runAndCapture("/usr/sbin/diskutil", ["info", "-plist", "/"]),
+           let plist = try? PropertyListSerialization.propertyList(from: data, options: [], format: nil) as? [String: Any]
+        {
+            if let physicalStores = plist["APFSPhysicalStores"] as? [[String: Any]] {
+                for store in physicalStores {
+                    if let physicalStore = store["APFSPhysicalStore"] as? String ?? store["DeviceIdentifier"] as? String,
+                       let wholeDisk = wholeDiskIdentifier(fromDevicePath: "/dev/\(physicalStore)")
+                    {
+                        return wholeDisk
+                    }
+                }
+            }
+
+            if let parentWholeDisk = plist["ParentWholeDisk"] as? String,
+               let wholeDisk = wholeDiskIdentifier(fromDevicePath: "/dev/\(parentWholeDisk)")
+            {
+                return wholeDisk
+            }
+        }
+
+        return rootWholeDiskIdentifierFromMountedRoot()
+    }
+
+    static func loadHardwarePortMap() -> [String: String] {
+        guard let data = try? Process.runAndCapture("/usr/sbin/networksetup", ["-listallhardwareports"]),
+              let text = String(data: data, encoding: .utf8)
+        else {
+            return [:]
+        }
+
+        var result: [String: String] = [:]
+        var currentPort: String?
+
+        for line in text.components(separatedBy: .newlines) {
+            if line.hasPrefix("Hardware Port:") {
+                currentPort = line.replacingOccurrences(of: "Hardware Port:", with: "").trimmingCharacters(in: .whitespaces)
+            } else if line.hasPrefix("Device:"), let currentPort {
+                let device = line.replacingOccurrences(of: "Device:", with: "").trimmingCharacters(in: .whitespaces)
+                if !device.isEmpty {
+                    result[device] = currentPort
+                }
+            }
+        }
+
+        return result
+    }
+
+    static func disabledLaunchdLabels(domain: String) -> Set<String> {
+        guard let data = try? Process.runAndCapture("/bin/launchctl", ["print-disabled", domain]),
+              let text = String(data: data, encoding: .utf8)
+        else {
+            return []
+        }
+
+        var labels: Set<String> = []
+        for line in text.components(separatedBy: .newlines) {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            guard trimmed.hasPrefix("\""), trimmed.contains("=> disabled") else { continue }
+            if let end = trimmed.dropFirst().firstIndex(of: "\"") {
+                labels.insert(String(trimmed.dropFirst()[..<end]))
+            }
+        }
+        return labels
+    }
+
+    static func launchdRuntimeEntries(uid: uid_t) -> [SystemMonitor.LaunchdRuntimeEntry] {
+        let systemEntries = parseLaunchctlPrintDomain("system", group: "system")
+        let guiEntries = parseLaunchctlPrintDomain("gui/\(uid)", group: "gui/\(uid)")
+        var merged: [String: SystemMonitor.LaunchdRuntimeEntry] = [:]
+
+        for entry in systemEntries + guiEntries {
+            guard shouldIncludeServiceLabel(entry.label) else { continue }
+            let key = serviceCompositeKey(label: entry.label, group: entry.group)
+            merged[key] = entry
+        }
+
+        return Array(merged.values)
+    }
+
+    static func parseLaunchctlPrintDomain(_ domain: String, group: String) -> [SystemMonitor.LaunchdRuntimeEntry] {
+        guard let data = try? Process.runAndCapture("/bin/launchctl", ["print", domain]),
+              let text = String(data: data, encoding: .utf8)
+        else {
+            return []
+        }
+
+        var result: [SystemMonitor.LaunchdRuntimeEntry] = []
+        var inServicesBlock = false
+
+        for line in text.components(separatedBy: .newlines) {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            if trimmed == "services = {" {
+                inServicesBlock = true
+                continue
+            }
+            if inServicesBlock, trimmed == "}" {
+                break
+            }
+            guard inServicesBlock else { continue }
+
+            let parts = trimmed.split(whereSeparator: \.isWhitespace)
+            guard parts.count >= 3 else { continue }
+
+            let label = String(parts.last!)
+            guard shouldIncludeServiceLabel(label) else { continue }
+
+            let pidToken = String(parts[0])
+            let stateToken = String(parts[1])
+            let pid: Int32?
+            if let value = Int32(pidToken), value > 0 {
+                pid = value
+            } else {
+                pid = nil
+            }
+
+            result.append(
+                SystemMonitor.LaunchdRuntimeEntry(
+                    label: label,
+                    pid: pid,
+                    stateToken: stateToken,
+                    group: group
+                )
+            )
+        }
+
+        return result
+    }
+
+    static func launchdPlistMetadata(uid: uid_t) -> [String: LaunchdPlistMetadataSnapshot] {
+        let directories = [
+            "/System/Library/LaunchDaemons",
+            "/System/Library/LaunchAgents",
+            "/Library/LaunchDaemons",
+            "/Library/LaunchAgents",
+            ("~/Library/LaunchAgents" as NSString).expandingTildeInPath
+        ]
+
+        let fileManager = FileManager.default
+        var result: [String: LaunchdPlistMetadataSnapshot] = [:]
+
+        for directory in directories {
+            guard let entries = try? fileManager.contentsOfDirectory(atPath: directory) else { continue }
+            for entry in entries where entry.hasSuffix(".plist") {
+                let path = (directory as NSString).appendingPathComponent(entry)
+                guard let data = fileManager.contents(atPath: path),
+                      let plist = try? PropertyListSerialization.propertyList(from: data, options: [], format: nil) as? [String: Any]
+                else {
+                    continue
+                }
+
+                let label = plist["Label"] as? String ?? entry.replacingOccurrences(of: ".plist", with: "")
+                guard shouldIncludeServiceLabel(label) else { continue }
+
+                let program = (plist["Program"] as? String)
+                    ?? (plist["ProgramArguments"] as? [String])?.first
+                    ?? ""
+                let executableName = serviceExecutableName(fromProgramPath: program)
+                let name = executableName.isEmpty ? serviceNameFallback(label: label) : executableName
+                let description = serviceDescriptionText(label: label, program: program, plist: plist)
+                let disabled = (plist["Disabled"] as? Bool) ?? false
+                let group = launchdGroup(forDirectory: directory, uid: uid)
+                let key = serviceCompositeKey(label: label, group: group)
+
+                result[key] = LaunchdPlistMetadataSnapshot(
+                    label: label,
+                    name: name,
+                    program: program.isEmpty ? nil : program,
+                    serviceDescription: description,
+                    group: group,
+                    disabled: disabled
+                )
+            }
+        }
+
+        return result
+    }
+
+    struct LaunchdPlistMetadataSnapshot {
+        let label: String
+        let name: String
+        let program: String?
+        let serviceDescription: String
+        let group: String
+        let disabled: Bool
+    }
+
+    static func launchdGroup(forDirectory directory: String, uid: uid_t) -> String {
+        if directory.contains("LaunchDaemons") {
+            return "system"
+        }
+        return "gui/\(uid)"
+    }
+
+    static func launchdGroupForStartupDirectory(_ directory: String) -> String {
+        if directory.contains("LaunchDaemons") {
+            return "system"
+        }
+        return "gui/\(getuid())"
+    }
+
+    static func directoryLabel(_ path: String) -> String {
+        if path.contains("LaunchDaemons") { return "系统守护进程" }
+        if path.contains("/Library/LaunchAgents") { return "系统代理" }
+        return "用户代理"
+    }
+
+    static func serviceCompositeKey(label: String, group: String) -> String {
+        "\(group)|\(label)"
+    }
+
+    static func shouldIncludeServiceLabel(_ label: String) -> Bool {
+        guard !label.isEmpty else { return false }
+        if label.hasPrefix("application.") { return false }
+        if label.hasPrefix("com.apple.xpc.") { return false }
+        return true
+    }
+
+    static func serviceExecutableName(fromProgramPath program: String) -> String {
+        guard !program.isEmpty else { return "" }
+        if program.hasSuffix(".app") {
+            return URL(fileURLWithPath: program).deletingPathExtension().lastPathComponent
+        }
+
+        let nsPath = program as NSString
+        let range = nsPath.range(of: ".app/")
+        if range.location != NSNotFound, let swiftRange = Range(range, in: program) {
+            let appPath = String(program[..<swiftRange.upperBound]).dropLast()
+            let appName = URL(fileURLWithPath: String(appPath)).deletingPathExtension().lastPathComponent
+            if !appName.isEmpty {
+                return appName
+            }
+        }
+
+        return URL(fileURLWithPath: program).lastPathComponent
+    }
+
+    static func serviceNameFallback(label: String) -> String {
+        let parts = label.split(separator: ".")
+        if let last = parts.last, !last.isEmpty {
+            return String(last)
+        }
+        return label
+    }
+
+    static func serviceDescriptionText(label: String, program: String, plist: [String: Any]) -> String {
+        if let bundleName = plist["CFBundleDisplayName"] as? String, !bundleName.isEmpty {
+            return bundleName
+        }
+        if let bundleName = plist["CFBundleName"] as? String, !bundleName.isEmpty {
+            return bundleName
+        }
+        if !program.isEmpty {
+            let executable = serviceExecutableName(fromProgramPath: program)
+            if !executable.isEmpty {
+                return "\(label) (\(executable))"
+            }
+        }
+        if let machServices = plist["MachServices"] as? [String: Any], !machServices.isEmpty {
+            return "\(label) (Mach Service)"
+        }
+        return label
+    }
+
+    static func serviceStatusText(pid: Int32?, stateToken: String, disabled: Bool) -> String {
+        if disabled {
+            return "已禁用"
+        }
+        if pid != nil {
+            return "正在运行"
+        }
+        if stateToken == "0" {
+            return "已停止"
+        }
+        if stateToken == "-" || stateToken.hasPrefix("(") {
+            return "按需"
+        }
+        return "已加载"
+    }
+
+    static func currentNeuralUsageTotals() -> SystemMonitor.NeuralUsageTotals {
+        let pids = listPIDs()
+        var total: UInt64 = 0
+        var peak: UInt64 = 0
+        for pid in pids where pid > 0 {
+            var usage = rusage_info_current()
+            let usageResult = withUnsafeMutablePointer(to: &usage) { pointer in
+                pointer.withMemoryRebound(to: rusage_info_t?.self, capacity: 1) { rebound in
+                    proc_pid_rusage(pid, RUSAGE_INFO_CURRENT, rebound)
+                }
+            }
+            if usageResult == 0 {
+                total += usage.ri_neural_footprint
+                peak = max(peak, usage.ri_interval_max_neural_footprint)
+            }
+        }
+        return SystemMonitor.NeuralUsageTotals(currentBytes: total, intervalPeakBytes: peak)
+    }
+
+    static func listPIDs() -> [Int32] {
+        let bufferSize = proc_listallpids(nil, 0)
+        guard bufferSize > 0 else { return [] }
+        let count = bufferSize / Int32(MemoryLayout<pid_t>.size)
+        var buffer = Array(repeating: pid_t(0), count: Int(count))
+        let bytes = proc_listallpids(&buffer, Int32(buffer.count * MemoryLayout<pid_t>.size))
+        guard bytes > 0 else { return [] }
+        return buffer.filter { $0 > 0 }
+    }
+
+    static func extractFirstMatch(in text: String, pattern: String) -> String? {
+        guard let regex = try? NSRegularExpression(pattern: pattern) else { return nil }
+        let range = NSRange(text.startIndex..., in: text)
+        guard let match = regex.firstMatch(in: text, range: range),
+              let captureRange = Range(match.range(at: 1), in: text)
+        else { return nil }
+        return String(text[captureRange])
+    }
+
+    static func sysctlInt(_ name: String) -> UInt64? {
+        var value: UInt64 = 0
+        var size = MemoryLayout<UInt64>.size
+        guard sysctlbyname(name, &value, &size, nil, 0) == 0 else { return nil }
+        return value
+    }
+
+    static func shifted(_ values: [Double], adding value: Double) -> [Double] {
+        var history = values
+        if history.isEmpty {
+            history = Array(repeating: 0, count: 60)
+        }
+        history.append(value)
+        if history.count > 60 {
+            history.removeFirst(history.count - 60)
+        }
+        return history
+    }
+
+    static func metalLabel(from raw: String) -> String {
+        switch raw {
+        case "spdisplays_metal4":
+            return "Metal 4"
+        case "spdisplays_metal3":
+            return "Metal 3"
+        case "spdisplays_metal2":
+            return "Metal 2"
+        default:
+            return raw.isEmpty ? "Metal" : raw
+        }
+    }
+
+    static func wholeDiskIdentifier(fromDevicePath devicePath: String) -> String? {
+        guard devicePath.hasPrefix("/dev/disk") else { return nil }
+        let raw = String(devicePath.dropFirst("/dev/".count))
+        let prefix = "disk"
+        guard raw.hasPrefix(prefix) else { return nil }
+
+        var result = prefix
+        var index = raw.index(raw.startIndex, offsetBy: prefix.count)
+        while index < raw.endIndex, raw[index].isNumber {
+            result.append(raw[index])
+            index = raw.index(after: index)
+        }
+        return result.count > prefix.count ? result : raw
     }
 }

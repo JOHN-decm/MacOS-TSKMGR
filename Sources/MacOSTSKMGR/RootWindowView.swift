@@ -18,6 +18,7 @@ struct RootWindowView: View {
     @StateObject private var monitor = SystemMonitor()
     @StateObject private var newTaskPanelManager = NewTaskPanelManager()
     @StateObject private var networkDetailsPanelManager = NetworkDetailsPanelManager()
+    @StateObject private var aboutPanelManager = AboutPanelManager()
     @State private var language: AppLanguage = .chinese
     @State private var selectedTab: TaskTab = .processes
     @State private var selectedPerf: PerfSelection = .cpu
@@ -246,9 +247,11 @@ struct RootWindowView: View {
             monitor.language = newValue
             newTaskPanelManager.update(language: newValue)
             networkDetailsPanelManager.updateLanguage(newValue)
+            aboutPanelManager.update(language: newValue)
         }
         .onAppear {
             monitor.language = language
+            monitor.start()
             updateWindowTrafficLights()
         }
         .environment(\.appLanguage, language)
@@ -319,6 +322,11 @@ struct RootWindowView: View {
             menuPanel {
                 menuItem(language.text("运行新任务(N)", "Run new task(N)"), altHint: nil) {
                     newTaskPanelManager.show(language: language)
+                    activeMenu = nil
+                }
+                Divider()
+                menuItem(language.text("关于", "About"), altHint: nil) {
+                    aboutPanelManager.show(language: language)
                     activeMenu = nil
                 }
                 Divider()
@@ -1408,6 +1416,104 @@ final class NetworkDetailsPanelManager: ObservableObject {
                 language: currentLanguage
             )
         )
+    }
+}
+
+@MainActor
+final class AboutPanelManager: ObservableObject {
+    private var panel: NSPanel?
+    private let panelSize = NSSize(width: 420, height: 320)
+
+    func show(language: AppLanguage) {
+        if panel == nil {
+            let panel = NSPanel(
+                contentRect: NSRect(origin: .zero, size: panelSize),
+                styleMask: [.titled, .closable],
+                backing: .buffered,
+                defer: false
+            )
+            panel.isReleasedWhenClosed = false
+            panel.hidesOnDeactivate = false
+            panel.isFloatingPanel = false
+            panel.titleVisibility = .visible
+            panel.titlebarAppearsTransparent = false
+            panel.isMovableByWindowBackground = false
+            panel.minSize = panelSize
+            panel.maxSize = panelSize
+            panel.standardWindowButton(.miniaturizeButton)?.isHidden = true
+            panel.standardWindowButton(.zoomButton)?.isHidden = true
+            self.panel = panel
+        }
+
+        update(language: language)
+        panel?.center()
+        panel?.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+    }
+
+    func update(language: AppLanguage) {
+        guard let panel else { return }
+        panel.title = language.text("关于 任务管理器", "About Task Manager")
+        panel.contentView = NSHostingView(
+            rootView: AboutPanelView(language: language)
+        )
+    }
+}
+
+struct AboutPanelView: View {
+    @Environment(\.colorScheme) private var colorScheme
+    let language: AppLanguage
+
+    var body: some View {
+        VStack(spacing: 18) {
+            VStack(spacing: 10) {
+                TaskManagerGlyph()
+                    .frame(width: 40, height: 40)
+                    .scaleEffect(2.0)
+                    .padding(.top, 8)
+
+                Text("MacOSTSKMGR")
+                    .font(.system(size: 26, weight: .semibold))
+                    .foregroundStyle(AppTheme.primaryText(colorScheme))
+
+                Text(versionLine)
+                    .font(.system(size: 13))
+                    .foregroundStyle(AppTheme.secondaryText(colorScheme))
+            }
+
+            Text(language.text(
+                "一个模仿 Windows 任务管理器交互与布局风格的 macOS 任务管理器实验项目。",
+                "An experimental macOS task manager inspired by the layout and interactions of Windows Task Manager."
+            ))
+            .font(.system(size: 13))
+            .foregroundStyle(AppTheme.primaryText(colorScheme))
+            .multilineTextAlignment(.center)
+            .frame(maxWidth: 320)
+
+            VStack(spacing: 6) {
+                Text(language.text("版权所有 © 2026 Linqin。保留所有权利。", "Copyright © 2026 Linqin. All rights reserved."))
+                Text(language.text("部分代码由 AI 协助生成。", "Some portions of the code were created with AI assistance."))
+            }
+            .font(.system(size: 12))
+            .foregroundStyle(AppTheme.secondaryText(colorScheme))
+            .multilineTextAlignment(.center)
+
+            Spacer()
+        }
+        .padding(.horizontal, 28)
+        .padding(.vertical, 24)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .background(WindowSurfaceBackground())
+    }
+
+    private var versionLine: String {
+        let shortVersion = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String
+            ?? Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String
+            ?? "1.0"
+        let buildVersion = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String
+            ?? Bundle.main.infoDictionary?["CFBundleVersion"] as? String
+            ?? "1"
+        return language.text("版本 \(shortVersion) (构建 \(buildVersion))", "Version \(shortVersion) (Build \(buildVersion))")
     }
 }
 
