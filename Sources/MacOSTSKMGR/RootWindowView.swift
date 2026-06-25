@@ -185,12 +185,14 @@ struct RootWindowView: View {
         }
         .background(WindowSurfaceBackground())
         .ignoresSafeArea(.container, edges: selectedTab == .performance && performanceViewMode != .full ? .all : .top)
-        .alert(language.text("结束任务失败", "End task failed"), isPresented: taskActionErrorPresented) {
-            Button(language.text("确定", "OK"), role: .cancel) {
-                taskActionErrorMessage = ""
-            }
-        } message: {
-            Text(taskActionErrorMessage)
+        .alert(isPresented: taskActionErrorPresented) {
+            Alert(
+                title: Text(language.text("结束任务失败", "End task failed")),
+                message: Text(taskActionErrorMessage),
+                dismissButton: .cancel(Text(language.text("确定", "OK"))) {
+                    taskActionErrorMessage = ""
+                }
+            )
         }
         .background(MenuKeyHandlingView(
             onAltF: { openMenu(.file) },
@@ -198,13 +200,14 @@ struct RootWindowView: View {
             onAltV: { openMenu(.view) },
             onEscape: { activeMenu = nil }
         ))
-        .onChange(of: alwaysOnTop) { _, value in
+        .onChange(of: alwaysOnTop) { value in
             updateWindowLevel(alwaysOnTop: value)
         }
-        .onChange(of: monitor.sidebarItems.map(\.id)) { oldIDs, newIDs in
+        .onChange(of: monitor.sidebarItems.map(\.id)) { newIDs in
             guard !newIDs.isEmpty else { return }
             guard !newIDs.contains(selectedPerf) else { return }
 
+            let oldIDs = monitor.sidebarItems.map(\.id)
             if let previousIndex = oldIDs.firstIndex(of: selectedPerf) {
                 let fallbackIndex = min(previousIndex, newIDs.count - 1)
                 selectedPerf = newIDs[fallbackIndex]
@@ -212,16 +215,16 @@ struct RootWindowView: View {
                 selectedPerf = newIDs[0]
             }
         }
-        .onChange(of: refreshSpeedParentHovered) { _, _ in
+        .onChange(of: refreshSpeedParentHovered) { _ in
             reconcileRefreshSubmenuVisibility()
         }
-        .onChange(of: refreshSpeedSubmenuHovered) { _, _ in
+        .onChange(of: refreshSpeedSubmenuHovered) { _ in
             reconcileRefreshSubmenuVisibility()
         }
-        .onChange(of: languageParentHovered) { _, _ in
+        .onChange(of: languageParentHovered) { _ in
             reconcileLanguageSubmenuVisibility()
         }
-        .onChange(of: languageSubmenuHovered) { _, _ in
+        .onChange(of: languageSubmenuHovered) { _ in
             reconcileLanguageSubmenuVisibility()
         }
         .onAppear {
@@ -229,21 +232,21 @@ struct RootWindowView: View {
             lastWindowPresentationMode = mode
             resizeWindowForCurrentMode(animated: false)
         }
-        .onChange(of: compactMode) { _, _ in
+        .onChange(of: compactMode) { _ in
             exitPerformanceSummaryIfNeeded()
             resizeWindowIfNeeded(animated: true)
         }
-        .onChange(of: performanceViewMode) { _, _ in
+        .onChange(of: performanceViewMode) { _ in
             resizeWindowIfNeeded(animated: true)
             updateWindowTrafficLights()
         }
-        .onChange(of: selectedTab) { _, _ in
+        .onChange(of: selectedTab) { _ in
             exitPerformanceSummaryIfNeeded()
             reconcileSelectionForCurrentTab()
             updateWindowTrafficLights()
             resizeWindowIfNeeded(animated: true)
         }
-        .onChange(of: language) { _, newValue in
+        .onChange(of: language) { newValue in
             monitor.language = newValue
             newTaskPanelManager.update(language: newValue)
             networkDetailsPanelManager.updateLanguage(newValue)
@@ -476,7 +479,7 @@ struct RootWindowView: View {
                 if let altHint {
                     Text(altHint)
                         .font(.system(size: 12))
-                        .foregroundStyle(.secondary)
+                        .compatSecondaryStyle()
                 }
             }
             .padding(.horizontal, 10)
@@ -490,7 +493,7 @@ struct RootWindowView: View {
         HStack {
             Text(title)
                 .font(.system(size: 13))
-                .foregroundStyle(.secondary)
+                .compatSecondaryStyle()
             Spacer()
         }
         .padding(.horizontal, 10)
@@ -526,7 +529,7 @@ struct RootWindowView: View {
                     Spacer()
                     Image(systemName: "chevron.right")
                         .font(.system(size: 10, weight: .semibold))
-                        .foregroundStyle(.secondary)
+                        .compatSecondaryStyle()
                 }
                 .padding(.horizontal, 10)
                 .frame(height: 28)
@@ -896,7 +899,7 @@ struct WindowChromeView: View {
                     TaskManagerGlyph()
                     Text(language.text("任务管理器", "Task Manager"))
                         .font(.system(size: 14, weight: .medium))
-                        .foregroundStyle(AppTheme.primaryText(colorScheme))
+                        .compatForegroundStyle(AppTheme.primaryText(colorScheme))
                 }
             }
             .padding(.horizontal, 10)
@@ -920,15 +923,11 @@ struct WindowChromeView: View {
                     } label: {
                         Text(tab.title(in: language))
                             .font(.system(size: 14))
-                            .foregroundStyle(AppTheme.primaryText(colorScheme))
+                            .compatForegroundStyle(AppTheme.primaryText(colorScheme))
                             .padding(.horizontal, 8)
                             .frame(height: 28)
                             .background(tab == selectedTab ? AppTheme.chromeSelectedFill(colorScheme) : Color.clear)
-                            .overlay(alignment: .bottom) {
-                                Rectangle()
-                                    .fill(tab == selectedTab ? AppTheme.accentBlue : .clear)
-                                    .frame(height: 2)
-                            }
+                            .overlay(Rectangle().fill(tab == selectedTab ? AppTheme.accentBlue : .clear).frame(height: 2), alignment: .bottom)
                     }
                     .buttonStyle(.plain)
                 }
@@ -938,7 +937,7 @@ struct WindowChromeView: View {
             .frame(height: 34)
             .padding(.bottom, 4)
         }
-        .background {
+        .background(
             ZStack {
                 VisualEffectBlur(material: .headerView, blendingMode: .withinWindow)
                 LinearGradient(
@@ -950,12 +949,8 @@ struct WindowChromeView: View {
                     endPoint: .bottom
                 )
             }
-        }
-        .overlay(alignment: .bottom) {
-            Rectangle()
-                .fill(AppTheme.separator(colorScheme))
-                .frame(height: 1)
-        }
+        )
+        .compatBottomDivider(AppTheme.separator(colorScheme))
     }
 
     private func chromeButton(_ title: String, menu: MenuKind) -> some View {
@@ -969,7 +964,7 @@ struct WindowChromeView: View {
         }
         .buttonStyle(.plain)
         .font(.system(size: 14))
-        .foregroundStyle(AppTheme.primaryText(colorScheme))
+        .compatForegroundStyle(AppTheme.primaryText(colorScheme))
     }
 }
 
@@ -1018,7 +1013,7 @@ struct FooterBarView: View {
                         .overlay(
                             Image(systemName: compactMode ? "chevron.down" : "chevron.up")
                                 .font(.system(size: 9, weight: .bold))
-                                .foregroundStyle(AppTheme.secondaryText(colorScheme))
+                                .compatForegroundStyle(AppTheme.secondaryText(colorScheme))
                         )
                     Text(compactMode ? language.text("详细信息(D)", "Fewer details(D)") : language.text("简略信息(D)", "Fewer details(D)"))
                         .font(.system(size: 13))
@@ -1031,14 +1026,14 @@ struct FooterBarView: View {
             }
                 .buttonStyle(.plain)
                 .font(.system(size: 13))
-                .foregroundStyle(AppTheme.accentBlue)
+                .compatForegroundStyle(AppTheme.accentBlue)
 
             Spacer()
 
             Button(primaryActionTitle, action: onPrimaryAction)
                 .buttonStyle(.plain)
                 .font(.system(size: 13))
-                .foregroundStyle(canEndTask ? AppTheme.primaryText(colorScheme) : AppTheme.secondaryText(colorScheme))
+                .compatForegroundStyle(canEndTask ? AppTheme.primaryText(colorScheme) : AppTheme.secondaryText(colorScheme))
                 .padding(.horizontal, 16)
                 .frame(height: 28)
                 .background(
@@ -1053,7 +1048,7 @@ struct FooterBarView: View {
         }
         .padding(.horizontal, 10)
         .frame(height: 46)
-        .background {
+        .background(
             ZStack {
                 VisualEffectBlur(material: .sheet, blendingMode: .withinWindow)
                 LinearGradient(
@@ -1065,12 +1060,8 @@ struct FooterBarView: View {
                     endPoint: .bottom
                 )
             }
-        }
-        .overlay(alignment: .top) {
-            Rectangle()
-                .fill(AppTheme.separator(colorScheme))
-                .frame(height: 1)
-        }
+        )
+        .compatTopDivider(AppTheme.separator(colorScheme))
     }
 }
 
@@ -1104,7 +1095,6 @@ struct CompactApplicationsView: View {
             }
         }
         .listStyle(.plain)
-        .scrollContentBackground(.hidden)
         .background(Color.clear)
         .onAppear {
             if selectedPID == nil {
@@ -1145,15 +1135,11 @@ struct CompactModeHeader: View {
         ZStack {
             Text(language.text("任务管理器", "Task Manager"))
                 .font(.system(size: 14, weight: .medium))
-                .foregroundStyle(AppTheme.primaryText(colorScheme))
+                .compatForegroundStyle(AppTheme.primaryText(colorScheme))
         }
         .padding(.horizontal, 12)
         .frame(height: 32)
-        .overlay(alignment: .bottom) {
-            Rectangle()
-                .fill(AppTheme.separator(colorScheme))
-                .frame(height: 1)
-        }
+        .compatBottomDivider(AppTheme.separator(colorScheme))
     }
 }
 
@@ -1175,7 +1161,7 @@ struct CompactModeFooter: View {
                         .overlay(
                             Image(systemName: "chevron.down")
                                 .font(.system(size: 9, weight: .bold))
-                                .foregroundStyle(AppTheme.secondaryText(colorScheme))
+                                .compatForegroundStyle(AppTheme.secondaryText(colorScheme))
                         )
                     Text(language.text("详细信息(D)", "Fewer details(D)"))
                         .font(.system(size: 13))
@@ -1188,7 +1174,7 @@ struct CompactModeFooter: View {
             Button(primaryActionTitle, action: onPrimaryAction)
                 .buttonStyle(.plain)
                 .font(.system(size: 13))
-                .foregroundStyle(canEndTask ? AppTheme.primaryText(colorScheme) : AppTheme.secondaryText(colorScheme))
+                .compatForegroundStyle(canEndTask ? AppTheme.primaryText(colorScheme) : AppTheme.secondaryText(colorScheme))
                 .padding(.horizontal, 16)
                 .frame(height: 28)
                 .background(
@@ -1204,11 +1190,7 @@ struct CompactModeFooter: View {
         .padding(.horizontal, 10)
         .frame(height: 46)
         .background(colorScheme == .dark ? Color.white.opacity(0.05) : Color.white.opacity(0.16))
-        .overlay(alignment: .top) {
-            Rectangle()
-                .fill(AppTheme.separator(colorScheme))
-                .frame(height: 1)
-        }
+        .compatTopDivider(AppTheme.separator(colorScheme))
     }
 }
 
@@ -1262,7 +1244,7 @@ struct NewTaskPanelView: View {
             if !errorMessage.isEmpty {
                 Text(errorMessage)
                     .font(.system(size: 12))
-                    .foregroundStyle(.red)
+                    .foregroundColor(.red)
             }
 
             HStack {
@@ -1474,11 +1456,11 @@ struct AboutPanelView: View {
 
                 Text("MacOSTSKMGR")
                     .font(.system(size: 26, weight: .semibold))
-                    .foregroundStyle(AppTheme.primaryText(colorScheme))
+                    .compatForegroundStyle(AppTheme.primaryText(colorScheme))
 
                 Text(versionLine)
                     .font(.system(size: 13))
-                    .foregroundStyle(AppTheme.secondaryText(colorScheme))
+                    .compatForegroundStyle(AppTheme.secondaryText(colorScheme))
             }
 
             Text(language.text(
@@ -1486,7 +1468,7 @@ struct AboutPanelView: View {
                 "An experimental macOS task manager inspired by the layout and interactions of Windows Task Manager."
             ))
             .font(.system(size: 13))
-            .foregroundStyle(AppTheme.primaryText(colorScheme))
+            .compatForegroundStyle(AppTheme.primaryText(colorScheme))
             .multilineTextAlignment(.center)
             .frame(maxWidth: 320)
 
@@ -1495,7 +1477,7 @@ struct AboutPanelView: View {
                 Text(language.text("部分代码由 AI 协助生成。", "Some portions of the code were created with AI assistance."))
             }
             .font(.system(size: 12))
-            .foregroundStyle(AppTheme.secondaryText(colorScheme))
+            .compatForegroundStyle(AppTheme.secondaryText(colorScheme))
             .multilineTextAlignment(.center)
 
             Spacer()
@@ -1530,9 +1512,7 @@ struct NetworkDetailsView: View {
             }
             .frame(height: 40)
             .background(AppTheme.tableHeader(colorScheme))
-            .overlay(alignment: .bottom) {
-                Rectangle().fill(AppTheme.strongSeparator(colorScheme)).frame(height: 1)
-            }
+            .compatBottomDivider(AppTheme.strongSeparator(colorScheme))
 
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
@@ -1598,10 +1578,8 @@ struct NetworkDetailsView: View {
             .lineLimit(1)
             .padding(.horizontal, 10)
             .frame(width: width, height: 40, alignment: .leading)
-            .foregroundStyle(AppTheme.primaryText(colorScheme))
-            .overlay(alignment: .trailing) {
-                Rectangle().fill(AppTheme.separator(colorScheme)).frame(width: 1)
-            }
+            .compatForegroundStyle(AppTheme.primaryText(colorScheme))
+            .compatTrailingDivider(AppTheme.separator(colorScheme))
     }
 
     private func detailCell(_ text: String, width: CGFloat) -> some View {
@@ -1610,10 +1588,8 @@ struct NetworkDetailsView: View {
             .lineLimit(1)
             .padding(.horizontal, 10)
             .frame(width: width, height: 30, alignment: .leading)
-            .foregroundStyle(AppTheme.primaryText(colorScheme))
-            .overlay(alignment: .trailing) {
-                Rectangle().fill(AppTheme.separator(colorScheme)).frame(width: 1)
-            }
+            .compatForegroundStyle(AppTheme.primaryText(colorScheme))
+            .compatTrailingDivider(AppTheme.separator(colorScheme))
     }
 
     private func formattedInteger(_ value: UInt64) -> String {

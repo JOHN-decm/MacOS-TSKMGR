@@ -106,11 +106,7 @@ struct PerformancePageView: View {
             }
         )
         .frame(width: 10)
-        .overlay {
-            Rectangle()
-                .fill(AppTheme.separator(colorScheme))
-                .frame(width: 1)
-        }
+        .overlay(Rectangle().fill(AppTheme.separator(colorScheme)).frame(width: 1))
     }
 
     private var sidebar: some View {
@@ -165,19 +161,19 @@ struct PerformancePageView: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text(item.title)
                     .font(.system(size: 18))
-                    .foregroundStyle(AppTheme.primaryText(colorScheme))
+                    .compatForegroundStyle(AppTheme.primaryText(colorScheme))
                     .multilineTextAlignment(.leading)
                     .lineLimit(1)
                     .truncationMode(.tail)
                 Text(item.subtitle)
                     .font(.system(size: 13))
-                    .foregroundStyle(AppTheme.primaryText(colorScheme).opacity(summaryMode ? 0.88 : 1))
+                    .compatForegroundStyle(AppTheme.primaryText(colorScheme).opacity(summaryMode ? 0.88 : 1))
                     .lineLimit(summaryMode ? 2 : 1)
                     .truncationMode(.tail)
                 if let tertiary = item.tertiary {
                     Text(tertiary)
                         .font(.system(size: 13))
-                        .foregroundStyle(AppTheme.primaryText(colorScheme).opacity(summaryMode ? 0.88 : 1))
+                        .compatForegroundStyle(AppTheme.primaryText(colorScheme).opacity(summaryMode ? 0.88 : 1))
                         .lineLimit(summaryMode ? 2 : 1)
                         .truncationMode(.tail)
                 }
@@ -204,25 +200,25 @@ struct PerformancePageView: View {
                         VStack(alignment: .leading, spacing: 4) {
                             Text(detail.title)
                                 .font(.system(size: 28))
-                                .foregroundStyle(AppTheme.primaryText(colorScheme))
+                                .compatForegroundStyle(AppTheme.primaryText(colorScheme))
                         }
                         Spacer()
                         VStack(alignment: .trailing, spacing: 4) {
                             Text(detail.topRight)
                                 .font(.system(size: 15))
-                                .foregroundStyle(AppTheme.primaryText(colorScheme))
+                                .compatForegroundStyle(AppTheme.primaryText(colorScheme))
                         }
                     }
 
                     HStack(spacing: 8) {
                         Text(detail.primaryLabel)
                             .font(.system(size: 13))
-                            .foregroundStyle(.secondary)
+                            .compatSecondaryStyle()
                         Spacer(minLength: 0)
                         if shouldShowMainChartCeiling {
                             Text(detail.ceilingLabel)
                                 .font(.system(size: 12))
-                                .foregroundStyle(.secondary)
+                                .compatSecondaryStyle()
                         }
                     }
 
@@ -243,7 +239,7 @@ struct PerformancePageView: View {
                             Text("0%")
                         }
                         .font(.system(size: 12))
-                        .foregroundStyle(.secondary)
+                        .compatSecondaryStyle()
                     } else {
                         HStack {
                             Text(language.text("60 秒", "60 sec"))
@@ -253,13 +249,13 @@ struct PerformancePageView: View {
                             }
                         }
                         .font(.system(size: 12))
-                        .foregroundStyle(.secondary)
+                        .compatSecondaryStyle()
                     }
 
                     if detail.memoryComposition {
                         Text(language.text("内存组合", "Memory composition"))
                             .font(.system(size: 13))
-                            .foregroundStyle(.secondary)
+                            .compatSecondaryStyle()
 
                         GeometryReader { proxy in
                             let usedRatio = detail.chartCeiling > 0
@@ -283,11 +279,11 @@ struct PerformancePageView: View {
                         HStack {
                             Text(lowerLabel)
                                 .font(.system(size: 13))
-                                .foregroundStyle(.secondary)
+                                .compatSecondaryStyle()
                             Spacer()
                             Text(detail.lowerChartCeiling ?? "")
                                 .font(.system(size: 12))
-                                .foregroundStyle(.secondary)
+                                .compatSecondaryStyle()
                         }
 
                         GridChart(
@@ -309,7 +305,7 @@ struct PerformancePageView: View {
                             }
                         }
                         .font(.system(size: 12))
-                        .foregroundStyle(.secondary)
+                        .compatSecondaryStyle()
                     }
 
                     if case .memory = selectedPerf {
@@ -341,18 +337,14 @@ struct PerformancePageView: View {
                 .padding(.bottom, PageInset.bottom)
             } else {
                 Text(language.text("没有可用的数据", "No data available"))
-                    .foregroundStyle(.secondary)
+                    .compatSecondaryStyle()
                     .padding(.leading, PageInset.horizontal)
                     .padding(.trailing, PageInset.horizontal)
                     .padding(.top, PageInset.top)
                     .padding(.bottom, PageInset.bottom)
             }
         }
-        .overlay(alignment: .trailing) {
-            Rectangle()
-                .fill(AppTheme.separator(colorScheme))
-                .frame(width: 1)
-        }
+        .compatTrailingDivider(AppTheme.separator(colorScheme))
     }
 
     private var shouldShowMainChartCeiling: Bool {
@@ -386,7 +378,7 @@ struct PerformancePageView: View {
                         Text("0")
                     }
                     .font(.system(size: 12))
-                    .foregroundStyle(.secondary)
+                    .compatSecondaryStyle()
                 }
                 .contentShape(Rectangle())
                 .contextMenu {
@@ -420,19 +412,19 @@ struct PerformancePageView: View {
             VStack(alignment: .leading, spacing: 4) {
                 Text(detail.title)
                     .font(.system(size: 28))
-                    .foregroundStyle(AppTheme.primaryText(colorScheme))
+                    .compatForegroundStyle(AppTheme.primaryText(colorScheme))
                 Text(detail.primaryLabel)
                     .font(.system(size: 13))
-                    .foregroundStyle(.secondary)
+                    .compatSecondaryStyle()
             }
             Spacer()
             VStack(alignment: .trailing, spacing: 4) {
                 Text(detail.topRight)
                     .font(.system(size: 15))
-                    .foregroundStyle(AppTheme.primaryText(colorScheme))
+                    .compatForegroundStyle(AppTheme.primaryText(colorScheme))
                 Text(detail.ceilingLabel)
                     .font(.system(size: 12))
-                    .foregroundStyle(.secondary)
+                    .compatSecondaryStyle()
             }
         }
     }
@@ -527,10 +519,10 @@ struct PerformancePageView: View {
                     VStack(alignment: .leading, spacing: 1) {
                         Text(metric.label)
                             .font(.system(size: 13))
-                            .foregroundStyle(.secondary)
+                            .compatSecondaryStyle()
                         Text(metric.value)
                             .font(.system(size: metric.prominent ? 22 : 18))
-                            .foregroundStyle(AppTheme.primaryText(colorScheme))
+                            .compatForegroundStyle(AppTheme.primaryText(colorScheme))
                     }
                 }
             }
@@ -544,13 +536,13 @@ struct PerformancePageView: View {
                 HStack(alignment: .firstTextBaseline, spacing: 8) {
                     Text(pair.label)
                         .font(.system(size: 14))
-                        .foregroundStyle(.secondary)
+                        .compatSecondaryStyle()
                         .lineLimit(1)
                         .fixedSize(horizontal: true, vertical: false)
                         .frame(width: 128, alignment: .leading)
                     Text(pair.value)
                         .font(.system(size: 14))
-                        .foregroundStyle(AppTheme.primaryText(colorScheme))
+                        .compatForegroundStyle(AppTheme.primaryText(colorScheme))
                 }
             }
         }
@@ -575,17 +567,17 @@ struct PerformancePageView: View {
         VStack(alignment: .leading, spacing: 10) {
             Text(title)
                 .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(.secondary)
+                .compatSecondaryStyle()
 
             LazyVGrid(columns: [GridItem(.flexible(), spacing: 18), GridItem(.flexible(), spacing: 18)], alignment: .leading, spacing: 14) {
                 ForEach(Array(rows.enumerated()), id: \.offset) { _, row in
                     VStack(alignment: .leading, spacing: 3) {
                         Text(row.0)
                             .font(.system(size: 12))
-                            .foregroundStyle(.secondary)
+                            .compatSecondaryStyle()
                         Text(row.1)
                             .font(.system(size: 18, weight: .medium))
-                            .foregroundStyle(AppTheme.primaryText(colorScheme))
+                            .compatForegroundStyle(AppTheme.primaryText(colorScheme))
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
                 }
@@ -612,15 +604,15 @@ struct PerformancePageView: View {
                 HStack(spacing: 4) {
                     Text(title)
                         .font(.system(size: 13))
-                        .foregroundStyle(.secondary)
+                        .compatSecondaryStyle()
                     Image(systemName: "chevron.down")
                         .font(.system(size: 9, weight: .bold))
-                        .foregroundStyle(.secondary)
+                        .compatSecondaryStyle()
                 }
                 Spacer(minLength: 0)
                 Text(valueText)
                     .font(.system(size: 12))
-                    .foregroundStyle(.secondary)
+                    .compatSecondaryStyle()
             }
         }
         .buttonStyle(.plain)
@@ -656,7 +648,7 @@ struct PerformancePageView: View {
                             .frame(width: 12)
                         Text(kind.title(in: language))
                             .font(.system(size: 13))
-                            .foregroundStyle(.secondary)
+                            .compatSecondaryStyle()
                         Spacer()
                     }
                     .padding(.horizontal, 10)
@@ -686,12 +678,7 @@ struct PerformancePageView: View {
                         .frame(height: chartHeights.gpuSingle)
                         .overlay(Rectangle().stroke(detail.accent, lineWidth: 1))
                 }
-                .overlay(alignment: .topLeading) {
-                    if openGPUMenu == .left {
-                        gpuMenu(target: .left)
-                            .offset(x: 0, y: 22)
-                    }
-                }
+                .overlay(openGPUMenu == .left ? AnyView(gpuMenu(target: .left).offset(x: 0, y: 22)) : AnyView(EmptyView()), alignment: .topLeading)
             } else {
                 HStack(spacing: 8) {
                     VStack(alignment: .leading, spacing: 4) {
@@ -700,12 +687,7 @@ struct PerformancePageView: View {
                             .frame(height: chartHeights.gpuDual)
                             .overlay(Rectangle().stroke(detail.accent, lineWidth: 1))
                     }
-                    .overlay(alignment: .topLeading) {
-                        if openGPUMenu == .left {
-                            gpuMenu(target: .left)
-                                .offset(x: 0, y: 22)
-                        }
-                    }
+                    .overlay(openGPUMenu == .left ? AnyView(gpuMenu(target: .left).offset(x: 0, y: 22)) : AnyView(EmptyView()), alignment: .topLeading)
 
                     VStack(alignment: .leading, spacing: 4) {
                         gpuHeader(title: rightGPUSelection.title(in: language), valueText: gpuValueText(for: rightGPUSelection, detail: detail), target: .right)
@@ -713,12 +695,7 @@ struct PerformancePageView: View {
                             .frame(height: chartHeights.gpuDual)
                             .overlay(Rectangle().stroke(detail.accent, lineWidth: 1))
                     }
-                    .overlay(alignment: .topLeading) {
-                        if openGPUMenu == .right {
-                            gpuMenu(target: .right)
-                                .offset(x: 0, y: 22)
-                        }
-                    }
+                    .overlay(openGPUMenu == .right ? AnyView(gpuMenu(target: .right).offset(x: 0, y: 22)) : AnyView(EmptyView()), alignment: .topLeading)
                 }
             }
         }
@@ -863,12 +840,7 @@ struct PerformancePageView: View {
                 .overlay(Rectangle().stroke(detail.accent, lineWidth: 1))
                 .frame(height: chartHeights.npuMain)
         }
-        .overlay(alignment: .topLeading) {
-            if openNPUMenu {
-                npuMenu()
-                    .offset(x: 0, y: 22)
-            }
-        }
+        .overlay(openNPUMenu ? AnyView(npuMenu().offset(x: 0, y: 22)) : AnyView(EmptyView()), alignment: .topLeading)
         .contentShape(Rectangle())
         .id("npu-detail-\(selectedPerf.id)")
     }
@@ -881,15 +853,15 @@ struct PerformancePageView: View {
                 HStack(spacing: 4) {
                     Text(language.text("Compute", "Compute"))
                         .font(.system(size: 13))
-                        .foregroundStyle(.secondary)
+                        .compatSecondaryStyle()
                     Image(systemName: "chevron.down")
                         .font(.system(size: 9, weight: .bold))
-                        .foregroundStyle(.secondary)
+                        .compatSecondaryStyle()
                 }
                 Spacer(minLength: 0)
                 Text(valueText)
                     .font(.system(size: 12))
-                    .foregroundStyle(.secondary)
+                    .compatSecondaryStyle()
             }
         }
         .buttonStyle(.plain)
@@ -1034,7 +1006,7 @@ struct PlaceholderPageView: View {
             Text(title)
                 .font(.system(size: 28))
             Text(language.text("这一页还没接入对应的系统数据。", "This page has not been connected to real system data yet."))
-                .foregroundStyle(.secondary)
+                .compatSecondaryStyle()
             Spacer()
         }
     }

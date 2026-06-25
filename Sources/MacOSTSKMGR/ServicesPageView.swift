@@ -49,9 +49,7 @@ struct ServicesPageView: View {
                 }
                 .frame(width: widths.total, height: ServicesColumnLayout.headerHeight, alignment: .leading)
                 .background(AppTheme.tableHeader(colorScheme))
-                .overlay(alignment: .bottom) {
-                    Rectangle().fill(AppTheme.strongSeparator(colorScheme)).frame(height: 1)
-                }
+                .compatBottomDivider(AppTheme.strongSeparator(colorScheme))
 
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 0) {
@@ -122,7 +120,7 @@ struct ServicesPageView: View {
                 if self.sortKey == sortKey {
                     Image(systemName: ascending ? "arrow.up" : "arrow.down")
                         .font(.system(size: 9, weight: .bold))
-                        .foregroundStyle(.secondary)
+                        .compatSecondaryStyle()
                 }
                 Spacer(minLength: 0)
             }
@@ -130,9 +128,7 @@ struct ServicesPageView: View {
             .frame(width: width, height: ServicesColumnLayout.headerHeight, alignment: .leading)
         }
         .buttonStyle(.plain)
-        .overlay(alignment: .trailing) {
-            Rectangle().fill(AppTheme.separator(colorScheme)).frame(width: 1)
-        }
+        .compatTrailingDivider(AppTheme.separator(colorScheme))
     }
 
     private func nameRowCell(_ row: ServiceRowData, width: CGFloat) -> some View {
@@ -141,14 +137,12 @@ struct ServicesPageView: View {
             Text(row.name)
                 .font(.system(size: 13))
                 .lineLimit(1)
-                .foregroundStyle(AppTheme.primaryText(colorScheme))
+                .compatForegroundStyle(AppTheme.primaryText(colorScheme))
             Spacer()
         }
         .padding(.horizontal, 10)
         .frame(width: width, height: ServicesColumnLayout.rowHeight, alignment: .leading)
-        .overlay(alignment: .trailing) {
-            Rectangle().fill(AppTheme.separator(colorScheme)).frame(width: 1)
-        }
+        .compatTrailingDivider(AppTheme.separator(colorScheme))
     }
 
     private func rowCell(_ value: String, width: CGFloat) -> some View {
@@ -158,10 +152,8 @@ struct ServicesPageView: View {
             .truncationMode(.tail)
             .padding(.horizontal, 10)
             .frame(width: width, height: ServicesColumnLayout.rowHeight, alignment: .leading)
-            .foregroundStyle(AppTheme.primaryText(colorScheme))
-            .overlay(alignment: .trailing) {
-                Rectangle().fill(AppTheme.separator(colorScheme)).frame(width: 1)
-            }
+            .compatForegroundStyle(AppTheme.primaryText(colorScheme))
+            .compatTrailingDivider(AppTheme.separator(colorScheme))
     }
 
     private func serviceRowBackground(_ row: ServiceRowData, rowIndex: Int) -> Color {

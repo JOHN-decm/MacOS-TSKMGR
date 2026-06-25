@@ -37,7 +37,7 @@ struct StartupPageView: View {
                     Spacer()
                     Text(language.text("本次系统启动时间: ", "Startup time: ") + "\(String(format: "%.1f", monitor.currentBootDurationSeconds())) " + language.text("秒", "s"))
                         .font(.system(size: 14))
-                        .foregroundStyle(AppTheme.primaryText(colorScheme))
+                        .compatForegroundStyle(AppTheme.primaryText(colorScheme))
                 }
                 .frame(width: widths.total, alignment: .trailing)
                 .padding(.bottom, 10)
@@ -50,9 +50,7 @@ struct StartupPageView: View {
                 }
                 .frame(width: widths.total, height: StartupColumnLayout.headerHeight, alignment: .leading)
                 .background(AppTheme.tableHeader(colorScheme))
-                .overlay(alignment: .bottom) {
-                    Rectangle().fill(AppTheme.strongSeparator(colorScheme)).frame(height: 1)
-                }
+                .compatBottomDivider(AppTheme.strongSeparator(colorScheme))
 
                 ScrollView {
                     VStack(alignment: .leading, spacing: 0) {
@@ -134,7 +132,7 @@ struct StartupPageView: View {
                 if self.sortKey == sortKey {
                     Image(systemName: ascending ? "arrow.up" : "arrow.down")
                         .font(.system(size: 9, weight: .bold))
-                        .foregroundStyle(.secondary)
+                        .compatSecondaryStyle()
                 }
                 Spacer(minLength: 0)
             }
@@ -142,9 +140,7 @@ struct StartupPageView: View {
             .frame(width: width, height: StartupColumnLayout.headerHeight, alignment: .leading)
         }
         .buttonStyle(.plain)
-        .overlay(alignment: .trailing) {
-            Rectangle().fill(AppTheme.separator(colorScheme)).frame(width: 1)
-        }
+        .compatTrailingDivider(AppTheme.separator(colorScheme))
     }
 
     private func rowCell(_ value: String, width: CGFloat, align: Alignment) -> some View {
@@ -153,10 +149,8 @@ struct StartupPageView: View {
             .lineLimit(1)
             .padding(.horizontal, 10)
             .frame(width: width, height: StartupColumnLayout.rowHeight, alignment: align)
-            .foregroundStyle(AppTheme.primaryText(colorScheme))
-            .overlay(alignment: .trailing) {
-                Rectangle().fill(AppTheme.separator(colorScheme)).frame(width: 1)
-            }
+            .compatForegroundStyle(AppTheme.primaryText(colorScheme))
+            .compatTrailingDivider(AppTheme.separator(colorScheme))
     }
 
     private func nameRowCell(_ row: StartupItemRowData, width: CGFloat) -> some View {
@@ -165,14 +159,12 @@ struct StartupPageView: View {
             Text(row.name)
                 .font(.system(size: 13))
                 .lineLimit(1)
-                .foregroundStyle(AppTheme.primaryText(colorScheme))
+                .compatForegroundStyle(AppTheme.primaryText(colorScheme))
             Spacer()
         }
         .padding(.horizontal, 10)
         .frame(width: width, height: StartupColumnLayout.rowHeight, alignment: .leading)
-        .overlay(alignment: .trailing) {
-            Rectangle().fill(AppTheme.separator(colorScheme)).frame(width: 1)
-        }
+        .compatTrailingDivider(AppTheme.separator(colorScheme))
     }
 
     private func startupRowBackground(_ row: StartupItemRowData, rowIndex: Int) -> Color {

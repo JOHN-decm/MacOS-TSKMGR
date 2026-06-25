@@ -2118,7 +2118,7 @@ extension SystemMonitor {
 
     func diskMetadata() -> [DiskMeta] {
         var iterator: io_iterator_t = 0
-        guard IOServiceGetMatchingServices(kIOMainPortDefault, IOServiceMatching("IOBlockStorageDriver"), &iterator) == KERN_SUCCESS else {
+        guard IOServiceGetMatchingServices(kIOMasterPortDefault, IOServiceMatching("IOBlockStorageDriver"), &iterator) == KERN_SUCCESS else {
             return []
         }
         defer { IOObjectRelease(iterator) }
@@ -2404,7 +2404,7 @@ extension SystemMonitor {
     }
 
     func detectAppleSiliconFrequencyText(propertyName: String) -> String? {
-        let service = IOServiceGetMatchingService(kIOMainPortDefault, IOServiceNameMatching("pmgr"))
+        let service = IOServiceGetMatchingService(kIOMasterPortDefault, IOServiceNameMatching("pmgr"))
         guard service != 0 else {
             return nil
         }

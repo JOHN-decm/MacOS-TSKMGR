@@ -61,9 +61,7 @@ struct DetailsPageView: View {
                 }
                 .frame(width: widths.total, height: DetailsColumnLayout.headerHeight, alignment: .leading)
                 .background(AppTheme.tableHeader(colorScheme))
-                .overlay(alignment: .bottom) {
-                    Rectangle().fill(AppTheme.strongSeparator(colorScheme)).frame(height: 1)
-                }
+                .compatBottomDivider(AppTheme.strongSeparator(colorScheme))
 
                 ScrollView {
                     VStack(alignment: .leading, spacing: 0) {
@@ -130,7 +128,7 @@ struct DetailsPageView: View {
                 if self.sortKey == sortKey {
                     Image(systemName: ascending ? "arrow.up" : "arrow.down")
                         .font(.system(size: 9, weight: .bold))
-                        .foregroundStyle(.secondary)
+                        .compatSecondaryStyle()
                 }
                 Spacer(minLength: 0)
             }
@@ -138,9 +136,7 @@ struct DetailsPageView: View {
             .frame(width: width, height: DetailsColumnLayout.headerHeight, alignment: .leading)
         }
         .buttonStyle(.plain)
-        .overlay(alignment: .trailing) {
-            Rectangle().fill(AppTheme.separator(colorScheme)).frame(width: 1)
-        }
+        .compatTrailingDivider(AppTheme.separator(colorScheme))
     }
 
     private func nameRowCell(_ row: DetailProcessRowData, width: CGFloat) -> some View {
@@ -149,14 +145,12 @@ struct DetailsPageView: View {
             Text(row.name)
                 .font(.system(size: 13))
                 .lineLimit(1)
-                .foregroundStyle(AppTheme.primaryText(colorScheme))
+                .compatForegroundStyle(AppTheme.primaryText(colorScheme))
             Spacer()
         }
         .padding(.horizontal, 10)
         .frame(width: width, height: DetailsColumnLayout.rowHeight, alignment: .leading)
-        .overlay(alignment: .trailing) {
-            Rectangle().fill(AppTheme.separator(colorScheme)).frame(width: 1)
-        }
+        .compatTrailingDivider(AppTheme.separator(colorScheme))
     }
 
     private func rowCell(_ value: String, width: CGFloat) -> some View {
@@ -165,10 +159,8 @@ struct DetailsPageView: View {
             .lineLimit(1)
             .padding(.horizontal, 10)
             .frame(width: width, height: DetailsColumnLayout.rowHeight, alignment: .leading)
-            .foregroundStyle(AppTheme.primaryText(colorScheme))
-            .overlay(alignment: .trailing) {
-                Rectangle().fill(AppTheme.separator(colorScheme)).frame(width: 1)
-            }
+            .compatForegroundStyle(AppTheme.primaryText(colorScheme))
+            .compatTrailingDivider(AppTheme.separator(colorScheme))
     }
 
     private func detailsRowBackground(_ row: DetailProcessRowData, rowIndex: Int) -> Color {

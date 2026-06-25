@@ -64,9 +64,7 @@ struct UsersPageView: View {
                 }
                 .frame(width: widths.total, height: UsersColumnLayout.headerHeight, alignment: .leading)
                 .background(AppTheme.tableHeader(colorScheme))
-                .overlay(alignment: .bottom) {
-                    Rectangle().fill(AppTheme.strongSeparator(colorScheme)).frame(height: 1)
-                }
+                .compatBottomDivider(AppTheme.strongSeparator(colorScheme))
 
                 ScrollView {
                     VStack(alignment: .leading, spacing: 0) {
@@ -80,12 +78,10 @@ struct UsersPageView: View {
                                     Text("\(userName) (\(rows.count))")
                                         .font(.system(size: 15))
                                 }
-                                .foregroundStyle(Color(red: 0.16, green: 0.34, blue: 0.77))
+                                .compatForegroundStyle(Color(red: 0.16, green: 0.34, blue: 0.77))
                                 .padding(.horizontal, 10)
                                 .frame(width: widths.user, height: UsersColumnLayout.rowHeight, alignment: .leading)
-                                .overlay(alignment: .trailing) {
-                                    Rectangle().fill(Color.black.opacity(0.08)).frame(width: 1)
-                                }
+                                .compatTrailingDivider(Color.black.opacity(0.08))
 
                                 rowCell("", width: widths.status)
                                 rowCell(DisplayFormat.percentWithPrecision(totalCPU, digits: 1), width: widths.cpu)
@@ -110,9 +106,7 @@ struct UsersPageView: View {
                                     }
                                     .padding(.horizontal, 10)
                                     .frame(width: widths.user, height: UsersColumnLayout.rowHeight, alignment: .leading)
-                                    .overlay(alignment: .trailing) {
-                                        Rectangle().fill(Color.black.opacity(0.08)).frame(width: 1)
-                                    }
+                                    .compatTrailingDivider(Color.black.opacity(0.08))
 
                                     rowCell("", width: widths.status)
                                     rowCell(DisplayFormat.percentWithPrecision(row.cpuPercent, digits: 1), width: widths.cpu)
@@ -174,7 +168,7 @@ struct UsersPageView: View {
                 if self.sortKey == sortKey {
                     Image(systemName: ascending ? "arrow.up" : "arrow.down")
                         .font(.system(size: 9, weight: .bold))
-                        .foregroundStyle(.secondary)
+                        .compatSecondaryStyle()
                 }
                 Spacer(minLength: 0)
             }
@@ -182,9 +176,7 @@ struct UsersPageView: View {
             .frame(width: width, height: UsersColumnLayout.headerHeight, alignment: .leading)
         }
         .buttonStyle(.plain)
-        .overlay(alignment: .trailing) {
-            Rectangle().fill(AppTheme.separator(colorScheme)).frame(width: 1)
-        }
+        .compatTrailingDivider(AppTheme.separator(colorScheme))
     }
 
     private func metricHeaderCell(_ value: String, label: String, sortKey: UsersSortKey, width: CGFloat) -> some View {
@@ -198,19 +190,17 @@ struct UsersPageView: View {
                     if self.sortKey == sortKey {
                         Image(systemName: ascending ? "arrow.up" : "arrow.down")
                             .font(.system(size: 9, weight: .bold))
-                            .foregroundStyle(.secondary)
+                            .compatSecondaryStyle()
                     }
                 }
                 Text(label)
                     .font(.system(size: 12))
-                    .foregroundStyle(.secondary)
+                    .compatSecondaryStyle()
             }
             .frame(width: width, height: UsersColumnLayout.headerHeight)
         }
         .buttonStyle(.plain)
-        .overlay(alignment: .trailing) {
-            Rectangle().fill(AppTheme.separator(colorScheme)).frame(width: 1)
-        }
+        .compatTrailingDivider(AppTheme.separator(colorScheme))
     }
 
     private func rowCell(_ value: String, width: CGFloat) -> some View {
@@ -219,9 +209,7 @@ struct UsersPageView: View {
             .lineLimit(1)
             .padding(.horizontal, 10)
             .frame(width: width, height: UsersColumnLayout.rowHeight, alignment: .leading)
-            .overlay(alignment: .trailing) {
-                Rectangle().fill(AppTheme.separator(colorScheme)).frame(width: 1)
-            }
+            .compatTrailingDivider(AppTheme.separator(colorScheme))
     }
 
     private func userAppRowBackground(_ row: ProcessRowData, rowIndex: Int) -> Color {

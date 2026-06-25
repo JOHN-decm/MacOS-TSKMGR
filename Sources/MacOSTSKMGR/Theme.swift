@@ -90,7 +90,7 @@ enum AppTheme {
         if scheme == .dark {
             return enabled ? Color.white.opacity(0.10) : Color.white.opacity(0.04)
         }
-        return enabled ? Color(nsColor: .controlBackgroundColor).opacity(0.86) : Color(nsColor: .controlBackgroundColor).opacity(0.42)
+        return enabled ? Color(NSColor.controlBackgroundColor).opacity(0.86) : Color(NSColor.controlBackgroundColor).opacity(0.42)
     }
 
     static func compactFooterStroke(_ scheme: ColorScheme) -> Color {

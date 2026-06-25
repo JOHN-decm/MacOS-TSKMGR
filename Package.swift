@@ -4,7 +4,7 @@ import PackageDescription
 let package = Package(
     name: "MacOSTSKMGR",
     platforms: [
-        .macOS(.v26)
+        .macOS(.v11)
     ],
     products: [
         .executable(name: "MacOSTSKMGR", targets: ["MacOSTSKMGR"])

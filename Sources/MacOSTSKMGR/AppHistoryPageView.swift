@@ -56,13 +56,13 @@ struct AppHistoryPageView: View {
                 VStack(alignment: .leading, spacing: 6) {
                     Text(language.text("自 2026/6/10 以来，当前用户帐户的资源使用情况。", "Resource usage for the current account since 2026/6/10."))
                         .font(.system(size: 14))
-                        .foregroundStyle(AppTheme.primaryText(colorScheme))
+                        .compatForegroundStyle(AppTheme.primaryText(colorScheme))
                     Button(language.text("删除使用情况历史记录", "Delete usage history")) {
                         monitor.clearAppHistory()
                     }
                     .buttonStyle(.plain)
                     .font(.system(size: 14))
-                    .foregroundStyle(Color(red: 0.13, green: 0.36, blue: 0.82))
+                    .compatForegroundStyle(Color(red: 0.13, green: 0.36, blue: 0.82))
                 }
                 .frame(width: widths.total, alignment: .leading)
                 .padding(.bottom, 10)
@@ -75,9 +75,7 @@ struct AppHistoryPageView: View {
                 }
                 .frame(width: widths.total, height: AppHistoryColumnLayout.headerHeight, alignment: .leading)
                 .background(AppTheme.tableHeader(colorScheme))
-                .overlay(alignment: .bottom) {
-                    Rectangle().fill(AppTheme.strongSeparator(colorScheme)).frame(height: 1)
-                }
+                .compatBottomDivider(AppTheme.strongSeparator(colorScheme))
 
                 ScrollView {
                     VStack(alignment: .leading, spacing: 0) {
@@ -147,11 +145,11 @@ struct AppHistoryPageView: View {
                 if self.sortKey == sortKey {
                     Image(systemName: ascending ? "arrow.up" : "arrow.down")
                         .font(.system(size: 9, weight: .bold))
-                        .foregroundStyle(.secondary)
+                        .compatSecondaryStyle()
                 } else {
                     Image(systemName: "arrow.up.arrow.down")
                         .font(.system(size: 9, weight: .bold))
-                        .foregroundStyle(.secondary.opacity(0.45))
+                        .foregroundColor(Color.secondary.opacity(0.45))
                 }
                 Spacer(minLength: 0)
             }
@@ -159,9 +157,7 @@ struct AppHistoryPageView: View {
             .frame(width: width, height: AppHistoryColumnLayout.headerHeight, alignment: alignLeading ? .leading : .center)
         }
         .buttonStyle(.plain)
-        .overlay(alignment: .trailing) {
-            Rectangle().fill(AppTheme.separator(colorScheme)).frame(width: 1)
-        }
+        .compatTrailingDivider(AppTheme.separator(colorScheme))
     }
 
     private func historyRowCell(_ value: String, width: CGFloat, alignLeading: Bool) -> some View {
@@ -170,10 +166,8 @@ struct AppHistoryPageView: View {
             .lineLimit(1)
             .padding(.horizontal, 10)
             .frame(width: width, height: AppHistoryColumnLayout.rowHeight, alignment: alignLeading ? .leading : .trailing)
-            .foregroundStyle(AppTheme.primaryText(colorScheme))
-            .overlay(alignment: .trailing) {
-                Rectangle().fill(AppTheme.separator(colorScheme)).frame(width: 1)
-            }
+            .compatForegroundStyle(AppTheme.primaryText(colorScheme))
+            .compatTrailingDivider(AppTheme.separator(colorScheme))
     }
 
     private func historyNameRowCell(_ row: AppHistoryRowData, width: CGFloat) -> some View {
@@ -182,14 +176,12 @@ struct AppHistoryPageView: View {
             Text(row.name)
                 .font(.system(size: 13))
                 .lineLimit(1)
-                .foregroundStyle(AppTheme.primaryText(colorScheme))
+                .compatForegroundStyle(AppTheme.primaryText(colorScheme))
             Spacer()
         }
         .padding(.horizontal, 10)
         .frame(width: width, height: AppHistoryColumnLayout.rowHeight, alignment: .leading)
-        .overlay(alignment: .trailing) {
-            Rectangle().fill(AppTheme.separator(colorScheme)).frame(width: 1)
-        }
+        .compatTrailingDivider(AppTheme.separator(colorScheme))
     }
 
     private func historyRowBackground(_ row: AppHistoryRowData, rowIndex: Int) -> Color {

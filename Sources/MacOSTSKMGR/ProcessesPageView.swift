@@ -97,9 +97,7 @@ struct ProcessesPageView: View {
         }
         .frame(height: ProcessColumnLayout.headerHeight)
         .background(AppTheme.tableHeaderStrong(colorScheme))
-        .overlay(alignment: .bottom) {
-            Rectangle().fill(AppTheme.strongSeparator(colorScheme)).frame(height: 1)
-        }
+        .compatBottomDivider(AppTheme.strongSeparator(colorScheme))
     }
 
     private var percentMemory: Double {
@@ -126,7 +124,7 @@ struct ProcessesPageView: View {
                 Text(language.translateProcessSectionTitle(title))
                     .font(.system(size: 15))
             }
-            .foregroundStyle(Color(red: 0.16, green: 0.34, blue: 0.77))
+            .compatForegroundStyle(Color(red: 0.16, green: 0.34, blue: 0.77))
             .padding(.top, 12)
             .padding(.bottom, 6)
             .padding(.leading, 10)
@@ -146,11 +144,11 @@ struct ProcessesPageView: View {
                 if self.sortKey == sortKey {
                     Image(systemName: ascending ? "arrow.up" : "arrow.down")
                         .font(.system(size: 9, weight: .bold))
-                        .foregroundStyle(.secondary)
+                        .compatSecondaryStyle()
                 } else if hoveredSortKey == sortKey {
                     Image(systemName: "arrow.up.arrow.down")
                         .font(.system(size: 9, weight: .bold))
-                        .foregroundStyle(.secondary.opacity(0.7))
+                        .foregroundColor(Color.secondary.opacity(0.7))
                 }
                 Spacer(minLength: 0)
             }
@@ -163,9 +161,7 @@ struct ProcessesPageView: View {
         .onHover { hovering in
             hoveredSortKey = hovering ? sortKey : nil
         }
-        .overlay(alignment: .trailing) {
-            Rectangle().fill(AppTheme.separator(colorScheme)).frame(width: 1)
-        }
+        .compatTrailingDivider(AppTheme.separator(colorScheme))
     }
 
     private func tableMetricHeader(_ value: String, label: String, sortKey: ProcessSortKey, width: CGFloat) -> some View {
@@ -179,16 +175,16 @@ struct ProcessesPageView: View {
                     if self.sortKey == sortKey {
                         Image(systemName: ascending ? "arrow.up" : "arrow.down")
                             .font(.system(size: 9, weight: .bold))
-                            .foregroundStyle(.secondary)
+                            .compatSecondaryStyle()
                     } else if hoveredSortKey == sortKey {
                         Image(systemName: "arrow.up.arrow.down")
                             .font(.system(size: 9, weight: .bold))
-                            .foregroundStyle(.secondary.opacity(0.7))
+                            .foregroundColor(Color.secondary.opacity(0.7))
                     }
                 }
                 Text(label)
                     .font(.system(size: 12))
-                    .foregroundStyle(.secondary)
+                    .compatSecondaryStyle()
             }
             .frame(width: width, height: ProcessColumnLayout.headerHeight)
             .contentShape(Rectangle())
@@ -198,9 +194,7 @@ struct ProcessesPageView: View {
         .onHover { hovering in
             hoveredSortKey = hovering ? sortKey : nil
         }
-        .overlay(alignment: .trailing) {
-            Rectangle().fill(AppTheme.separator(colorScheme)).frame(width: 1)
-        }
+        .compatTrailingDivider(AppTheme.separator(colorScheme))
     }
 
     private func processDataRow(_ row: ProcessRowData, rowIndex: Int, widths: ProcessScaledWidths) -> some View {
@@ -243,9 +237,7 @@ struct ProcessesPageView: View {
         }
         .padding(.leading, 10)
         .frame(width: width, height: ProcessColumnLayout.rowHeight, alignment: .leading)
-        .overlay(alignment: .trailing) {
-            Rectangle().fill(AppTheme.separator(colorScheme)).frame(width: 1)
-        }
+        .compatTrailingDivider(AppTheme.separator(colorScheme))
     }
 
     private func rowTextCell(_ value: String, width: CGFloat) -> some View {
@@ -254,9 +246,7 @@ struct ProcessesPageView: View {
             .lineLimit(1)
             .padding(.leading, 8)
             .frame(width: width, height: ProcessColumnLayout.rowHeight, alignment: .leading)
-            .overlay(alignment: .trailing) {
-                Rectangle().fill(AppTheme.separator(colorScheme)).frame(width: 1)
-            }
+            .compatTrailingDivider(AppTheme.separator(colorScheme))
     }
 
     private func rowMetricCell(_ value: String, width: CGFloat) -> some View {
@@ -265,9 +255,7 @@ struct ProcessesPageView: View {
             .lineLimit(1)
             .padding(.leading, 8)
             .frame(width: width, height: ProcessColumnLayout.rowHeight, alignment: .leading)
-            .overlay(alignment: .trailing) {
-                Rectangle().fill(AppTheme.separator(colorScheme)).frame(width: 1)
-            }
+            .compatTrailingDivider(AppTheme.separator(colorScheme))
     }
 
     private func sortKeyForColumn(_ column: ProcessColumn) -> ProcessSortKey {
@@ -504,7 +492,7 @@ struct ProcessIconView: View {
             RoundedRectangle(cornerRadius: 3, style: .continuous)
                 .fill(Color.gray.opacity(0.26))
                 .frame(width: 16, height: 16)
-                .overlay(Image(systemName: "app").font(.system(size: 8)).foregroundStyle(.secondary))
+                .overlay(Image(systemName: "app").font(.system(size: 8)).foregroundColor(.secondary))
         }
     }
 }

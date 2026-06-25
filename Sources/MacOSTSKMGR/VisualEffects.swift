@@ -31,32 +31,28 @@ struct LiquidGlassCardModifier: ViewModifier {
 
     func body(content: Content) -> some View {
         content
-            .background {
-                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                    .fill(.clear)
-                    .background(
-                        VisualEffectBlur(material: material, blendingMode: .withinWindow)
-                            .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
-                    )
-                    .overlay(
-                        RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                            .fill(
-                                LinearGradient(
-                                    colors: [
-                                        (colorScheme == .dark ? tint.opacity(0.42) : tint.opacity(0.9)),
-                                        (colorScheme == .dark ? tint.opacity(0.14) : tint.opacity(0.35))
-                                    ],
-                                    startPoint: .topLeading,
-                                    endPoint: .bottomTrailing
-                                )
-                            )
-                    )
-                    .overlay(
-                        RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                            .stroke(stroke, lineWidth: 1)
-                    )
-                    .shadow(color: .black.opacity(0.08), radius: 12, x: 0, y: 8)
-            }
+            .background(backgroundView)
+    }
+
+    private var backgroundView: some View {
+        let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+        return ZStack {
+            VisualEffectBlur(material: material, blendingMode: .withinWindow)
+                .clipShape(shape)
+            shape.fill(
+                LinearGradient(
+                    colors: [
+                        (colorScheme == .dark ? tint.opacity(0.42) : tint.opacity(0.9)),
+                        (colorScheme == .dark ? tint.opacity(0.14) : tint.opacity(0.35))
+                    ],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+            )
+            shape.strokeBorder(stroke, lineWidth: 1)
+        }
+        .clipShape(shape)
+        .shadow(color: Color.black.opacity(0.08), radius: 12, x: 0, y: 8)
     }
 }
 
@@ -73,22 +69,41 @@ extension View {
     func winMenuPanel() -> some View {
         modifier(ThemeMenuPanelModifier())
     }
+
+    func compatForegroundStyle(_ color: Color) -> some View {
+        foregroundColor(color)
+    }
+
+    func compatSecondaryStyle() -> some View {
+        foregroundColor(.secondary)
+    }
+
+    func compatTrailingDivider(_ color: Color) -> some View {
+        overlay(Rectangle().fill(color).frame(width: 1), alignment: .trailing)
+    }
+
+    func compatBottomDivider(_ color: Color) -> some View {
+        overlay(Rectangle().fill(color).frame(height: 1), alignment: .bottom)
+    }
+
+    func compatTopDivider(_ color: Color) -> some View {
+        overlay(Rectangle().fill(color).frame(height: 1), alignment: .top)
+    }
 }
 
 private struct ThemeMenuPanelModifier: ViewModifier {
     @Environment(\.colorScheme) private var colorScheme
     func body(content: Content) -> some View {
         content
-            .background(
-                ZStack {
-                    VisualEffectBlur(material: .menu, blendingMode: .withinWindow)
-                    AppTheme.menuPanelOverlay(colorScheme)
-                }
-            )
-            .overlay(
-                Rectangle()
-                    .stroke(AppTheme.menuPanelStroke(colorScheme), lineWidth: 1)
-            )
-            .shadow(color: .black.opacity(0.18), radius: 8, x: 0, y: 4)
+            .background(menuBackground)
+            .overlay(Rectangle().strokeBorder(AppTheme.menuPanelStroke(colorScheme), lineWidth: 1))
+            .shadow(color: Color.black.opacity(0.18), radius: 8, x: 0, y: 4)
+    }
+
+    private var menuBackground: some View {
+        ZStack {
+            VisualEffectBlur(material: .menu, blendingMode: .withinWindow)
+            AppTheme.menuPanelOverlay(colorScheme)
+        }
     }
 }
