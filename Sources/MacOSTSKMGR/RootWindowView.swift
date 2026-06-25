@@ -1559,14 +1559,17 @@ struct NetworkDetailsView: View {
         let totalPackets = network.packetsSent + network.packetsReceived
         let totalMulticast = network.multicastSent + network.multicastReceived
         let bytesPerInterval = network.sendBytesPerSecond + network.receiveBytesPerSecond
+        let sendRatePercent = currentLinkPercent(bytesPerSecond: network.sendBytesPerSecond)
+        let receiveRatePercent = currentLinkPercent(bytesPerSecond: network.receiveBytesPerSecond)
+        let totalRatePercent = currentLinkPercent(bytesPerSecond: bytesPerInterval)
 
         return [
-            (language.text("网络使用率", "Network utilization"), "0%"),
+            (language.text("网络使用率", "Network utilization"), formattedOptionalPercent(totalRatePercent)),
             (language.text("链接速度", "Link speed"), network.linkSpeedText),
             (language.text("状态", "Status"), network.statusText),
-            (language.text("发送字节百分比", "Send byte rate"), "0%"),
-            (language.text("接收字节百分比", "Recv byte rate"), "0%"),
-            (language.text("字节百分比", "Byte rate"), "0%"),
+            (language.text("发送字节百分比", "Send byte rate"), formattedOptionalPercent(sendRatePercent)),
+            (language.text("接收字节百分比", "Recv byte rate"), formattedOptionalPercent(receiveRatePercent)),
+            (language.text("字节百分比", "Byte rate"), formattedOptionalPercent(totalRatePercent)),
             (language.text("已发送的字节", "Bytes sent"), formattedInteger(network.totalSendBytes)),
             (language.text("已接收的字节", "Bytes received"), formattedInteger(network.totalReceiveBytes)),
             (language.text("字节", "Bytes"), formattedInteger(totalBytes)),
@@ -1617,6 +1620,21 @@ struct NetworkDetailsView: View {
         let formatter = NumberFormatter()
         formatter.numberStyle = .decimal
         return formatter.string(from: NSNumber(value: value)) ?? "\(value)"
+    }
+
+    private func formattedPercent(_ value: Double) -> String {
+        String(format: "%.1f%%", value)
+    }
+
+    private func formattedOptionalPercent(_ value: Double?) -> String {
+        guard let value else { return "--" }
+        return formattedPercent(value)
+    }
+
+    private func currentLinkPercent(bytesPerSecond: UInt64) -> Double? {
+        guard network.linkSpeedBitsPerSecond > 0 else { return nil }
+        let bitsPerSecond = Double(bytesPerSecond) * 8
+        return min(bitsPerSecond / Double(network.linkSpeedBitsPerSecond) * 100, 100)
     }
 }
 

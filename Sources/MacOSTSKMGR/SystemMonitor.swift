@@ -7,6 +7,7 @@ import MachO
 import IOKit
 import IOKit.storage
 import CoreFoundation
+import CoreWLAN
 
 @MainActor
 final class SystemMonitor: ObservableObject {
@@ -473,7 +474,7 @@ final class SystemMonitor: ObservableObject {
         }
 
         if cpu.coreHistories.isEmpty {
-            let coreCount = max(cpu.logicalCores, 8)
+            let coreCount = max(cpu.logicalCores, 1)
             cpu.coreHistories = Array(repeating: cpu.history, count: coreCount)
         }
     }
@@ -871,6 +872,7 @@ final class SystemMonitor: ObservableObject {
                 dropsIn: sample.representative.dropsIn,
                 dropsOut: sample.representative.dropsOut,
                 mtu: sample.representative.mtu,
+                linkSpeedBitsPerSecond: sample.representative.lineSpeedBitsPerSecond,
                 linkSpeedText: networkLinkSpeedText(for: sample.representative),
                 statusText: networkStatusText(for: sample.representative),
                 totalHistory: sidebarHistory,
@@ -947,10 +949,10 @@ final class SystemMonitor: ObservableObject {
 
     private func cpuDetail() -> PerformanceDetailViewData {
         var rightPairs: [InfoPair] = [
-            .init(label: language.text("插槽", "Sockets"), value: "1"),
+            .init(label: language.text("插槽", "Sockets"), value: "\(sysctlInt("hw.packages") ?? 1)"),
             .init(label: language.text("内核", "Cores"), value: "\(cpu.physicalCores)"),
             .init(label: language.text("逻辑处理器", "Logical processors"), value: "\(cpu.logicalCores)"),
-            .init(label: language.text("虚拟化", "Virtualization"), value: "Apple Hypervisor")
+            .init(label: language.text("虚拟化", "Virtualization"), value: virtualizationStatusText())
         ]
         if cpu.performanceCoreSpeedText != "--" || cpu.efficiencyCoreSpeedText != "--" {
             if cpu.performanceCoreSpeedText != "--" {
@@ -998,6 +1000,19 @@ final class SystemMonitor: ObservableObject {
             rightPairs: rightPairs,
             memoryComposition: false
         )
+    }
+
+    private func virtualizationStatusText() -> String {
+        let supported = sysctlInt("kern.hv_support") ?? sysctlInt("kern.hv.supported") ?? 0
+        guard supported == 1 else {
+            return language.text("不支持", "Not supported")
+        }
+
+        let disabled = sysctlInt("kern.hv_disable") ?? 0
+        if disabled != 0 {
+            return language.text("已禁用", "Disabled")
+        }
+        return language.text("支持", "Supported")
     }
 
     private func localizedCachePairs(_ pairs: [InfoPair]) -> [InfoPair] {
@@ -1179,7 +1194,7 @@ final class SystemMonitor: ObservableObject {
     }
 
     private func cpuGridHistories() -> [[Double]] {
-        let targetCount = max(8, cpu.logicalCores == 0 ? 8 : cpu.logicalCores)
+        let targetCount = max(cpu.logicalCores, 1)
         if cpu.coreHistories.count >= targetCount {
             return Array(cpu.coreHistories.prefix(targetCount))
         }
@@ -1248,6 +1263,7 @@ extension SystemMonitor {
         let dropsIn: UInt64
         let dropsOut: UInt64
         let mtu: UInt32
+        let lineSpeedBitsPerSecond: UInt64
     }
 
     struct GroupedNetworkSample {
@@ -1932,7 +1948,8 @@ extension SystemMonitor {
                 errorsOut: interfaceCounter(name: name, keyPath: \.ifi_oerrors),
                 dropsIn: interfaceCounter(name: name, keyPath: \.ifi_iqdrops),
                 dropsOut: 0,
-                mtu: interfaceMTU(name: name)
+                mtu: interfaceMTU(name: name),
+                lineSpeedBitsPerSecond: interfaceLineSpeed(name: name, medium: medium)
             )
         }
     }
@@ -1993,16 +2010,47 @@ extension SystemMonitor {
     }
 
     func networkLinkSpeedText(for snapshot: InterfaceSnapshot) -> String {
-        if snapshot.medium == "Wi-Fi" {
-            return "Wi-Fi"
-        }
-        if snapshot.medium.localizedCaseInsensitiveContains("Ethernet") || snapshot.displayName == "以太网" {
-            return "10 Gbps"
+        if snapshot.lineSpeedBitsPerSecond > 0 {
+            return DisplayFormat.linkSpeed(bitsPerSecond: snapshot.lineSpeedBitsPerSecond)
         }
         if snapshot.medium.localizedCaseInsensitiveContains("VPN") {
             return language.text("虚拟", "Virtual")
         }
         return snapshot.medium
+    }
+
+    func interfaceLineSpeed(name: String, medium: String) -> UInt64 {
+        if medium == "Wi-Fi" {
+            return wifiTransmitRateBitsPerSecond(interfaceName: name)
+        }
+        return interfaceBaudRate(name: name)
+    }
+
+    func interfaceBaudRate(name: String) -> UInt64 {
+        var pointer: UnsafeMutablePointer<ifaddrs>?
+        guard getifaddrs(&pointer) == 0, let first = pointer else { return 0 }
+        defer { freeifaddrs(pointer) }
+
+        var current = first
+        while true {
+            let ifa = current.pointee
+            let currentName = String(cString: ifa.ifa_name)
+            if currentName == name, let data = ifa.ifa_data?.assumingMemoryBound(to: if_data.self) {
+                return UInt64(data.pointee.ifi_baudrate)
+            }
+            guard let next = ifa.ifa_next else { break }
+            current = next
+        }
+        return 0
+    }
+
+    func wifiTransmitRateBitsPerSecond(interfaceName: String) -> UInt64 {
+        guard let interface = CWWiFiClient.shared().interface(withName: interfaceName) else {
+            return 0
+        }
+        let rateMbps = interface.transmitRate()
+        guard rateMbps > 0 else { return 0 }
+        return UInt64(rateMbps * 1_000_000)
     }
 
     func interfaceCounter(name: String, keyPath: KeyPath<if_data, UInt32>) -> UInt64 {
@@ -2632,18 +2680,31 @@ private enum MonitorProbe {
             return previous
         }
 
-        var next: [GPUState] = []
-        let gpuCount = profilerItems.count
-        for (index, item) in profilerItems.enumerated() {
-            guard let model = item["sppci_model"] as? String ?? item["_name"] as? String else { continue }
-            let metalRaw = item["spdisplays_mtlgpufamilysupport"] as? String ?? ""
-            let metalVersion = metalLabel(from: metalRaw)
-            let coreCount = Int(item["sppci_cores"] as? String ?? "") ?? 0
-            let gpuType = ((item["sppci_bus"] as? String) == "spdisplays_builtin")
-                ? language.text("内建", "Internal")
-                : language.text("外建", "External")
+        let devices = MTLCopyAllDevices()
+        let acceleratorByRegistryID = Dictionary(uniqueKeysWithValues: acceleratorArray.compactMap { entry -> (UInt64, [String: Any])? in
+            guard let registryID = (entry["IORegistryEntryID"] as? NSNumber)?.uint64Value else { return nil }
+            return (registryID, entry)
+        })
 
-            let ioEntry = acceleratorArray[safe: min(index, acceleratorArray.count - 1)]
+        var next: [GPUState] = []
+        let gpuCount = max(profilerItems.count, devices.count)
+
+        for (index, device) in devices.enumerated() {
+            let ioEntry = acceleratorByRegistryID[device.registryID]
+            let matchedProfilerItem = profilerItems.first { item in
+                let itemModel = item["sppci_model"] as? String ?? item["_name"] as? String ?? ""
+                if itemModel.isEmpty { return false }
+                return itemModel.localizedCaseInsensitiveContains(device.name) || device.name.localizedCaseInsensitiveContains(itemModel)
+            } ?? profilerItems[safe: index]
+
+            let model = matchedProfilerItem?["sppci_model"] as? String
+                ?? matchedProfilerItem?["_name"] as? String
+                ?? device.name
+            let metalRaw = matchedProfilerItem?["spdisplays_mtlgpufamilysupport"] as? String ?? ""
+            let metalVersion = resolvedMetalVersion(raw: metalRaw, device: device)
+            let coreCount = Int(matchedProfilerItem?["sppci_cores"] as? String ?? "") ?? 0
+            let gpuType = resolvedGPUType(device: device, profilerItem: matchedProfilerItem, language: language)
+
             let performance = ioEntry?["PerformanceStatistics"] as? [String: Any]
             let deviceUtil = (performance?["Device Utilization %"] as? NSNumber)?.doubleValue ?? 0
             let rendererUtil = (performance?["Renderer Utilization %"] as? NSNumber)?.doubleValue ?? 0
@@ -3164,6 +3225,47 @@ private enum MonitorProbe {
         default:
             return raw.isEmpty ? "Metal" : raw
         }
+    }
+
+    static func resolvedMetalVersion(raw: String, device: any MTLDevice) -> String {
+        if !raw.isEmpty {
+            return metalLabel(from: raw)
+        }
+        if #available(macOS 26.0, *) {
+            if device.supportsFamily(.metal4) {
+                return "Metal 4"
+            }
+        }
+        if #available(macOS 13.0, *) {
+            if device.supportsFamily(.metal3) {
+                return "Metal 3"
+            }
+        }
+        return "Metal"
+    }
+
+    static func resolvedGPUType(device: any MTLDevice, profilerItem: [String: Any]?, language: AppLanguage) -> String {
+        if #available(macOS 10.15, *) {
+            switch device.location {
+            case .builtIn:
+                return language.text("内建", "Internal")
+            case .external:
+                return language.text("外建", "External")
+            default:
+                break
+            }
+        }
+
+        if let bus = profilerItem?["sppci_bus"] as? String {
+            return bus == "spdisplays_builtin"
+                ? language.text("内建", "Internal")
+                : language.text("外建", "External")
+        }
+
+        if device.isRemovable {
+            return language.text("外建", "External")
+        }
+        return language.text("内建", "Internal")
     }
 
     static func wholeDiskIdentifier(fromDevicePath devicePath: String) -> String? {

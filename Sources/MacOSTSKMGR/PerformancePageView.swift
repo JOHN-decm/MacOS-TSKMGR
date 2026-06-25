@@ -46,7 +46,7 @@ struct PerformancePageView: View {
                     let chartHeights = chartHeights(
                         for: proxy.size,
                         sidebarWidth: clampedSidebarWidth,
-                        cpuChartCount: max(monitor.cpu.logicalCores, 8)
+                        cpuChartCount: max(monitor.cpu.logicalCores, 1)
                     )
 
                     HStack(spacing: 0) {

@@ -433,6 +433,7 @@ struct NetworkState: Identifiable {
     var dropsIn: UInt64
     var dropsOut: UInt64
     var mtu: UInt32
+    var linkSpeedBitsPerSecond: UInt64
     var linkSpeedText: String
     var statusText: String
     var totalHistory: [Double]
@@ -566,6 +567,16 @@ enum DisplayFormat {
             return String(format: "%.1f Kbps", kilobits)
         }
         return String(format: "%.2f Mbps", kilobits / 1000)
+    }
+
+    static func linkSpeed(bitsPerSecond: UInt64) -> String {
+        guard bitsPerSecond > 0 else { return "--" }
+        let megabits = Double(bitsPerSecond) / 1_000_000
+        if megabits < 1000 {
+            return String(format: "%.1f Mbps", megabits)
+        }
+        let gigabits = megabits / 1000
+        return String(format: "%.1f Gbps", gigabits)
     }
 
     static func uptime(_ seconds: TimeInterval) -> String {
